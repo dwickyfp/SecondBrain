@@ -769,6 +769,83 @@ fn internal_materialization_does_not_loop_back() {
 }
 
 // ---------------------------------------------------------------------------
+// Unknown syntax survives external-edit adoption
+// ---------------------------------------------------------------------------
+
+#[test]
+fn external_edit_of_a_known_paragraph_preserves_unmodelled_syntax_byte_for_byte() {
+    // `%%...%%` (an Obsidian comment) and `![[...]]` (a wikilink embed) are
+    // not modelled by the Markdown parser at all: they parse as ordinary
+    // paragraph text, indistinguishable from any other prose node. Their
+    // survival across an external edit therefore rests entirely on
+    // `SourceDocument` retaining the original bytes for every node the diff
+    // does not touch, not on any dedicated "unknown syntax" node kind.
+    let unmodelled_comment = "%%TODO: confirm attendees%%";
+    let unmodelled_embed = "![[whiteboard.png]]";
+    let base = format!(
+        "# Meeting Notes\n\n{unmodelled_comment}\n\n{unmodelled_embed}\n\nAlice owns the migration.\n"
+    );
+    let external = format!(
+        "# Meeting Notes\n\n{unmodelled_comment}\n\n{unmodelled_embed}\n\nAlice owns the migration and the rollout.\n"
+    );
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+
+    // An external editor changes only the ordinary paragraph; the unmodelled
+    // syntax is carried through untouched.
+    workspace.write(NOTE, &external);
+    let outcome = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect("integrate external edit");
+
+    let ExternalEditOutcome::Adopted {
+        note_id: adopted_note,
+        transaction_id,
+        version,
+    } = outcome
+    else {
+        panic!("expected the edit to be adopted, got {outcome:?}");
+    };
+    assert_eq!(adopted_note, note_id);
+    assert_eq!(version, NoteVersion::new(1));
+
+    // The file on disk is byte-exact with what the editor wrote. This is the
+    // discriminating assertion: if the coordinator ever normalized,
+    // re-serialized, or dropped either unmodelled fragment, this fails.
+    let on_disk = workspace.read(NOTE);
+    assert_eq!(on_disk, external);
+    assert!(
+        on_disk.contains(unmodelled_comment),
+        "the Obsidian comment must survive verbatim: {on_disk:?}"
+    );
+    assert!(
+        on_disk.contains(unmodelled_embed),
+        "the wikilink embed must survive verbatim: {on_disk:?}"
+    );
+
+    // Only the paragraph that actually changed produced an operation — the
+    // two unmodelled nodes were never journaled or rewritten, and the edit is
+    // attributed to the external actor exactly like any other adoption.
+    let records = workspace.records(note_id);
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].transaction_id, transaction_id);
+    assert_eq!(records[0].actor_id, ActorId::new(EXTERNAL_ACTOR).unwrap());
+    assert_eq!(records[0].device_id, DeviceId::new(DEVICE).unwrap());
+    assert_eq!(records[0].operation.kind_name(), "ReplaceNode");
+    let marker = workspace.marker(transaction_id);
+    assert_eq!(marker["state"], "COMMITTED");
+
+    // The unmodelled syntax survives into the next converged base too, not
+    // just onto disk this once.
+    let base_after = workspace.base(note_id);
+    assert_eq!(base_after, external);
+    assert!(base_after.contains(unmodelled_comment));
+    assert!(base_after.contains(unmodelled_embed));
+}
+
+// ---------------------------------------------------------------------------
 // Deletion and engine contract
 // ---------------------------------------------------------------------------
 
