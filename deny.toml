@@ -10,11 +10,13 @@ allow = [
     "BSD-2-Clause",
     "MIT",
     "Unicode-3.0",
+    "Zlib",
 ]
 
 [bans]
 skip = [
     { crate = "syn@2.0.119", reason = "ULID wasm support requires web-time and wasm-bindgen, which still uses syn 2" },
+    { crate = "hashbrown@0.16.1", reason = "rusqlite 0.39 uses hashlink/sqlite-wasm-rs on hashbrown 0.16 while serde_yaml uses indexmap on hashbrown 0.17" },
 ]
 
 [sources]
