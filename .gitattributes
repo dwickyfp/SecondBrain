@@ -1,3 +1,7 @@
-fixtures/markdown/source-preservation/crlf.md binary
-fixtures/markdown/frontmatter/crlf_frontmatter.md binary
-fixtures/markdown/**.md -text
+# Markdown fixtures are LF unless a fixture intentionally exercises CRLF.
+fixtures/markdown/**/*.md text eol=lf
+
+# Preserve intentional CRLF fixture blobs byte-for-byte.
+fixtures/markdown/source-preservation/crlf.md binary !eol
+fixtures/markdown/frontmatter/crlf_frontmatter.md binary !eol
+fixtures/markdown/commonmark/crlf.md binary !eol
