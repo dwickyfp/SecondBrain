@@ -8,6 +8,8 @@ confidence-threshold = 0.93
 allow = [
     "Apache-2.0",
     "BSD-2-Clause",
+    "CC0-1.0",
+    "ISC",
     "MIT",
     "Unicode-3.0",
     "Zlib",
@@ -17,6 +19,7 @@ allow = [
 skip = [
     { crate = "syn@2.0.119", reason = "ULID wasm support requires web-time and wasm-bindgen, which still uses syn 2" },
     { crate = "hashbrown@0.16.1", reason = "rusqlite 0.39 uses hashlink/sqlite-wasm-rs on hashbrown 0.16 while serde_yaml uses indexmap on hashbrown 0.17" },
+    { crate = "windows-sys@0.60.2", reason = "notify 8.2 and notify-debouncer-full 0.7 require windows-sys 0.60 while tempfile/rustix require 0.61" },
 ]
 
 [sources]

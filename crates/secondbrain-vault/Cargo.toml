@@ -9,11 +9,14 @@ license.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+notify.workspace = true
+notify-debouncer-full = "0.7.0"
 secondbrain-core = { path = "../secondbrain-core" }
 secondbrain-markdown = { path = "../secondbrain-markdown" }
 serde.workspace = true
 serde_json = "1.0"
 tempfile.workspace = true
+thiserror.workspace = true
 toml.workspace = true
 ulid.workspace = true
 
