@@ -2,39 +2,59 @@ use std::error::Error;
 use std::fmt;
 use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use ulid::Ulid;
 
 /// An error returned when a typed domain ID is not a valid canonical ULID.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct IdParseError {
-    source: ulid::DecodeError,
+    source: Option<ulid::DecodeError>,
+}
+
+impl IdParseError {
+    const fn noncanonical() -> Self {
+        Self { source: None }
+    }
 }
 
 impl fmt::Display for IdParseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "invalid ULID: {}", self.source)
+        match self.source {
+            Some(source) => write!(formatter, "invalid ULID: {source}"),
+            None => formatter.write_str("invalid ULID: expected canonical uppercase text"),
+        }
     }
 }
 
 impl Error for IdParseError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.source)
+        self.source
+            .as_ref()
+            .map(|source| source as &(dyn Error + 'static))
     }
 }
 
 impl From<ulid::DecodeError> for IdParseError {
     fn from(source: ulid::DecodeError) -> Self {
-        Self { source }
+        Self {
+            source: Some(source),
+        }
     }
+}
+
+fn parse_canonical_ulid(value: &str) -> Result<Ulid, IdParseError> {
+    let parsed = value.parse::<Ulid>().map_err(IdParseError::from)?;
+    if value.as_bytes() != parsed.to_string().as_bytes() {
+        return Err(IdParseError::noncanonical());
+    }
+
+    Ok(parsed)
 }
 
 macro_rules! define_ulid_id {
     ($name:ident, $description:literal) => {
         #[doc = $description]
-        #[derive(
-            Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
-        )]
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
         #[serde(transparent)]
         pub struct $name(Ulid);
 
@@ -62,7 +82,17 @@ macro_rules! define_ulid_id {
             type Err = IdParseError;
 
             fn from_str(value: &str) -> Result<Self, Self::Err> {
-                value.parse().map(Self).map_err(IdParseError::from)
+                parse_canonical_ulid(value).map(Self)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let value = String::deserialize(deserializer)?;
+                value.parse().map_err(serde::de::Error::custom)
             }
         }
     };

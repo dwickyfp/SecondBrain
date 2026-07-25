@@ -32,6 +32,9 @@ mod tests {
         (workspace_id, transaction_id)
     }
 
+    const CANONICAL_ULID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const OVERFLOW_ULID_ALIAS: &str = "80000000000000000000000000";
+
     fn assert_json_round_trip<T>(value: &T, expected_json: &str)
     where
         T: serde::Serialize + serde::de::DeserializeOwned + Eq + std::fmt::Debug,
@@ -41,6 +44,70 @@ mod tests {
         let decoded: T = serde_json::from_str(&json).expect("value deserializes");
         assert_eq!(&decoded, value);
     }
+
+    fn noncanonical_ulid_forms() -> [String; 4] {
+        [
+            CANONICAL_ULID.to_ascii_lowercase(),
+            CANONICAL_ULID[..25].to_owned(),
+            format!("{CANONICAL_ULID}0"),
+            OVERFLOW_ULID_ALIAS.to_owned(),
+        ]
+    }
+
+    fn assert_parse_rejects_noncanonical_ulids<T>()
+    where
+        T: FromStr,
+    {
+        for candidate in noncanonical_ulid_forms() {
+            assert!(
+                candidate.parse::<T>().is_err(),
+                "noncanonical ULID must be rejected: {candidate:?}"
+            );
+        }
+    }
+
+    fn assert_serde_rejects_noncanonical_ulids<T>()
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        for candidate in noncanonical_ulid_forms() {
+            let json = serde_json::to_string(&candidate).expect("candidate serializes");
+            assert!(
+                serde_json::from_str::<T>(&json).is_err(),
+                "noncanonical ULID JSON must be rejected: {json}"
+            );
+        }
+    }
+
+    macro_rules! rejects_noncanonical_ulids {
+        ($parse_test:ident, $serde_test:ident, $id:ty) => {
+            #[test]
+            fn $parse_test() {
+                assert_parse_rejects_noncanonical_ulids::<$id>();
+            }
+
+            #[test]
+            fn $serde_test() {
+                assert_serde_rejects_noncanonical_ulids::<$id>();
+            }
+        };
+    }
+
+    rejects_noncanonical_ulids!(
+        workspace_id_rejects_noncanonical_text,
+        workspace_id_serde_rejects_noncanonical_text,
+        WorkspaceId
+    );
+    rejects_noncanonical_ulids!(
+        note_id_rejects_noncanonical_text,
+        note_id_serde_rejects_noncanonical_text,
+        NoteId
+    );
+    rejects_noncanonical_ulids!(
+        transaction_id_rejects_noncanonical_text,
+        transaction_id_serde_rejects_noncanonical_text,
+        TransactionId
+    );
 
     #[test]
     fn note_id_new_uses_canonical_ulid_text_and_round_trips() {
