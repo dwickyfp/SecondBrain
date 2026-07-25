@@ -32,7 +32,7 @@ use secondbrain_core::actor::{ActorId, DeviceId, IdentityError};
 use secondbrain_core::hash::ContentHash;
 use secondbrain_core::id::{NoteId, NoteVersion, TransactionId, WorkspaceId};
 use secondbrain_core::path::WorkspacePath;
-use secondbrain_markdown::apply::apply_operations;
+use secondbrain_markdown::apply::{apply_operations, review_reason_summary};
 use secondbrain_markdown::diff::diff_documents;
 use secondbrain_markdown::operation::SemanticOperation;
 use secondbrain_markdown::parse::ParseError;
@@ -44,7 +44,9 @@ use thiserror::Error;
 
 use crate::base_snapshot::{BaseSnapshot, BaseSnapshotStore, SnapshotError};
 use crate::engine::{TransactionEngine, TransactionError, TransactionRequest};
+use crate::failpoint;
 use crate::oplog::{LocalMutationLog, OplogError};
+use crate::paths;
 use crate::record::LocalOperationRecord;
 
 /// The version a note's converged base starts at, before any transaction.
@@ -78,6 +80,18 @@ pub enum ExternalEditOutcome {
     /// against. Nothing was written or journaled.
     Registered {
         /// The identity assigned to the file.
+        note_id: NoteId,
+    },
+    /// A note the workspace already tracks had no converged base to diff
+    /// against, so the edit that prompted this could not be recovered. The
+    /// content now on disk was recorded as the base instead; nothing was
+    /// written or journaled, and whatever the edit changed is unattributed.
+    ///
+    /// This is not [`Self::Registered`]: the note was known, so a base was
+    /// expected. It means the note predates this pipeline, or its snapshot was
+    /// lost — the latter being data loss worth surfacing rather than absorbing.
+    BaseRecovered {
+        /// The note whose base had to be reconstructed from the current file.
         note_id: NoteId,
     },
     /// The file already held the note's converged base. Nothing to do.
@@ -245,9 +259,11 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
 
         let Some(base) = self.bases.load(note_id)? else {
             // The note has an identity but no converged base — it was
-            // registered before this pipeline saw it. Its current content is
-            // the only base we can honestly claim to have agreed on.
-            return self.register_base(note_id, &path, &source);
+            // registered before this pipeline saw it, or its record was lost.
+            // Its current content is the only base we can honestly claim to
+            // have agreed on, and the edit that brought us here is gone.
+            self.converge(note_id, &path, GENESIS_VERSION, &source)?;
+            return Ok(ExternalEditOutcome::BaseRecovered { note_id });
         };
         if base.source_hash == source_hash {
             // Nothing changed since the workspace last converged this note.
@@ -403,10 +419,6 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
             let Some(attribution) = attribution else {
                 continue;
             };
-            // The superseded transaction is closed out first: if the rebase
-            // never lands, recovery must not replay operations for a state that
-            // no longer exists.
-            self.engine.supersede_transaction(transaction_id)?;
             let mut request = self.request(
                 note_id,
                 path,
@@ -419,6 +431,17 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
             (request.actor, request.device) = attribution;
             let rebase_id = request.id;
             let outcome = self.engine.commit(request)?;
+            failpoint::hit("after_rebase_before_supersede")?;
+            // The rebase is durable before the transaction it carries forward
+            // is closed out. `OPERATIONS_DURABLE` is the promise that recovery
+            // will finish an edit, so retracting it first would leave a crash
+            // window in which the operations are aborted here and never
+            // journaled there — reachable from neither end. In the other
+            // order a crash leaves the original marker untouched, and
+            // recovery closes it out through the state machine it owns:
+            // operations that no longer anchor in the file on disk abort, and
+            // the file is preserved rather than guessed at.
+            self.engine.supersede_transaction(transaction_id)?;
             version = outcome.version;
             merge = Some(Merge {
                 transaction_id: rebase_id,
@@ -451,12 +474,9 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
             source_hash,
             identity_candidates,
         };
-        let directory = self
-            .workspace
-            .canonical_path()
-            .join(".secondbrain/transactions");
-        fs::create_dir_all(&directory)?;
-        let target = directory.join(format!("{transaction_id}.conflict.json"));
+        let root = self.workspace.canonical_path();
+        fs::create_dir_all(paths::transactions_dir(root))?;
+        let target = paths::review_descriptor_path(root, transaction_id);
         secondbrain_vault::atomic_write::atomic_write(
             &target,
             &serde_json::to_vec_pretty(&descriptor)?,
@@ -568,23 +588,18 @@ struct ReviewDescriptor<'a> {
 }
 
 /// The reason review is required, if any operation demands it.
+///
+/// Only the summary half of the reason is kept. A descriptor says *why* review
+/// is needed; the note's content is on disk already and does not need a second
+/// copy inside the workspace's own state, so the incoming source the diff layer
+/// embeds is dropped by the accessor that owns that format.
 fn review_reason(operations: &[SemanticOperation]) -> Option<String> {
     operations.iter().find_map(|operation| match operation {
-        SemanticOperation::NeedsReview { reason, .. } => Some(summarize(reason)),
+        SemanticOperation::NeedsReview { reason, .. } => {
+            Some(review_reason_summary(reason).to_owned())
+        }
         _ => None,
     })
-}
-
-/// Strips the incoming source the diff layer embeds in a review reason.
-///
-/// The descriptor is a summary of *why* review is needed; the note's content is
-/// on disk and does not need a second copy inside the workspace's state.
-fn summarize(reason: &str) -> String {
-    reason
-        .split("__INCOMING__")
-        .next()
-        .unwrap_or(reason)
-        .to_owned()
 }
 
 fn operations_of(

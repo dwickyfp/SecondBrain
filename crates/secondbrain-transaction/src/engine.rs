@@ -16,6 +16,7 @@ use thiserror::Error;
 use crate::base_snapshot::{BaseSnapshotStore, SnapshotError};
 use crate::failpoint;
 use crate::oplog::{LocalMutationLog, OplogError};
+use crate::paths;
 use crate::record::{FORMAT_VERSION_1, LocalOperationRecord, RecordEncodeError};
 use crate::state::{StateTransitionError, TransactionState};
 
@@ -134,11 +135,18 @@ impl TransactionEngine {
         self.workspace
             .atomic_write(&request.path, materialized.as_bytes())?;
         failpoint::hit("after_rename_before_commit")?;
+        // The converged base is recorded *before* the transaction is marked
+        // committed. A crash in between then leaves a `MATERIALIZING` marker,
+        // which recovery re-materializes idempotently and whose base it
+        // records — whereas a crash after a `COMMITTED` marker but before the
+        // base would leave a committed version whose pre-state nothing holds,
+        // and the next external edit would diff against the stale base and
+        // journal this transaction's own operations a second time.
+        self.record_converged_base(&request, version, &materialized)?;
         state.transition_to(TransactionState::Committed)?;
         self.persist_state(&request, state, version, false)?;
         failpoint::hit("after_commit_before_index")?;
         self.persist_state(&request, state, version, true)?;
-        self.record_converged_base(&request, version, &materialized)?;
 
         Ok(CommitOutcome {
             changed: true,
@@ -191,17 +199,20 @@ impl TransactionEngine {
         {
             return Err(TransactionError::NeedsReview);
         }
+        // Checked before the post-state comparison, which an empty operation
+        // set would otherwise decide: there is nothing to journal either way,
+        // and no version to bump for having journaled it.
+        if request.operations.is_empty() {
+            return Ok(CommitOutcome {
+                changed: false,
+                version: request.expected_version,
+            });
+        }
         let post_state = apply_operations(base, &request.operations)?;
         if post_state != source {
             return Err(TransactionError::PostStateMismatch {
                 expected: ContentHash::digest(post_state.as_bytes()),
                 actual: actual_hash,
-            });
-        }
-        if request.operations.is_empty() {
-            return Ok(CommitOutcome {
-                changed: false,
-                version: request.expected_version,
             });
         }
         let version = request
@@ -210,9 +221,14 @@ impl TransactionEngine {
             .ok_or(TransactionError::VersionOverflow)?;
 
         self.journal_operations(&request)?;
+        // Base first, marker last, for the reason [`Self::commit`] gives. Here
+        // a crash in between leaves journal records no marker claims — which
+        // recovery ignores — and a base equal to what is already on disk, so
+        // the next event for this note correctly reports nothing to do.
+        self.record_converged_base(&request, version, &source)?;
+        failpoint::hit("during_adopt_convergence")?;
         self.persist_state(&request, TransactionState::Committed, version, false)?;
         self.persist_state(&request, TransactionState::Committed, version, true)?;
-        self.record_converged_base(&request, version, &source)?;
 
         Ok(CommitOutcome {
             changed: false,
@@ -297,13 +313,10 @@ impl TransactionEngine {
             committed_version: version,
             index_repaired,
         })?;
-        let directory = self
-            .workspace
-            .canonical_path()
-            .join(".secondbrain/transactions");
-        fs::create_dir_all(&directory)?;
+        let root = self.workspace.canonical_path();
+        fs::create_dir_all(paths::transactions_dir(root))?;
         secondbrain_vault::atomic_write::atomic_write(
-            &directory.join(format!("{}.json", request.id)),
+            &paths::marker_path(root, request.id),
             &bytes,
         )?;
         Ok(())

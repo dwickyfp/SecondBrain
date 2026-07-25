@@ -11,6 +11,7 @@ pub mod engine;
 pub mod external_edit;
 pub mod failpoint;
 pub mod oplog;
+mod paths;
 pub mod record;
 pub mod recovery;
 pub mod state;

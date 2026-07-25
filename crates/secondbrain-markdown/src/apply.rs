@@ -458,16 +458,36 @@ fn apply_remove_property(source: &str, key: &str) -> Result<String> {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Opens the incoming source embedded in a `NeedsReview` reason.
+const INCOMING_MARKER: &str = "__INCOMING__";
+
+/// Closes the incoming source embedded in a `NeedsReview` reason.
+const INCOMING_END_MARKER: &str = "__END_INCOMING__";
+
+/// The human-readable half of a [`SemanticOperation::NeedsReview`] reason.
+///
+/// A reason may carry the whole incoming source after it, in the private
+/// `__INCOMING__<source>__END_INCOMING__` form [`apply_operations`] reads back.
+/// Callers that only want to *describe* why review is needed — a conflict
+/// descriptor, a log line, a message to a human — take this instead, so the
+/// note's content is not copied into state that is not the note.
+#[must_use]
+pub fn review_reason_summary(reason: &str) -> &str {
+    reason
+        .split(INCOMING_MARKER)
+        .next()
+        .unwrap_or(reason)
+        .trim_end()
+}
+
 /// Extract an embedded incoming source from a NeedsReview reason string.
 ///
 /// The diff layer embeds the incoming source in the reason using the format:
 /// `__INCOMING__<source>__END_INCOMING__` when ambiguity is detected.
 fn extract_incoming_from_reason(reason: &str) -> Option<String> {
-    let marker = "__INCOMING__";
-    let end_marker = "__END_INCOMING__";
-    let start = reason.find(marker)?;
-    let content_start = start + marker.len();
-    let end = reason[content_start..].find(end_marker)?;
+    let start = reason.find(INCOMING_MARKER)?;
+    let content_start = start + INCOMING_MARKER.len();
+    let end = reason[content_start..].find(INCOMING_END_MARKER)?;
     Some(reason[content_start..content_start + end].to_string())
 }
 
@@ -477,5 +497,5 @@ fn extract_incoming_from_reason(reason: &str) -> Option<String> {
 /// apply layer can recover the incoming source.
 #[allow(dead_code)]
 pub(crate) fn embed_incoming_in_reason(reason: &str, incoming: &str) -> String {
-    format!("{reason}__INCOMING__{incoming}__END_INCOMING__")
+    format!("{reason}{INCOMING_MARKER}{incoming}{INCOMING_END_MARKER}")
 }

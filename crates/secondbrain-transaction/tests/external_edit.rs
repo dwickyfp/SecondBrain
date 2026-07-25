@@ -16,9 +16,9 @@ use secondbrain_core::id::{NoteId, NoteVersion, TransactionId, WorkspaceId};
 use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::SourceDocument;
 use secondbrain_markdown::diff::diff_documents;
-use secondbrain_transaction::base_snapshot::BaseSnapshotStore;
+use secondbrain_transaction::base_snapshot::{BaseSnapshot, BaseSnapshotStore};
 use secondbrain_transaction::external_edit::{
-    ExternalEditCoordinator, ExternalEditOutcome, IndexRefresh,
+    ExternalEditCoordinator, ExternalEditError, ExternalEditOutcome, IndexRefresh,
 };
 use secondbrain_transaction::oplog::LocalMutationLog;
 use secondbrain_transaction::record::LocalOperationRecord;
@@ -139,12 +139,35 @@ impl Workspace {
         serde_json::from_slice(&fs::read(&path).expect("read marker")).expect("parse marker")
     }
 
-    fn base(&self, note_id: NoteId) -> String {
+    fn base_record(&self, note_id: NoteId) -> BaseSnapshot {
         BaseSnapshotStore::new(&self.root)
             .load(note_id)
             .expect("load base")
             .expect("base exists")
-            .source
+    }
+
+    fn base(&self, note_id: NoteId) -> String {
+        self.base_record(note_id).source
+    }
+
+    /// Every transaction marker in the workspace, whichever note it belongs to.
+    fn markers(&self) -> Vec<serde_json::Value> {
+        let directory = self.root.canonical_path().join(".secondbrain/transactions");
+        let mut markers = Vec::new();
+        for entry in fs::read_dir(&directory).expect("read transactions") {
+            let path = entry.expect("entry").path();
+            let is_marker = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| stem.parse::<TransactionId>().is_ok());
+            if is_marker {
+                markers.push(
+                    serde_json::from_slice(&fs::read(&path).expect("read marker"))
+                        .expect("parse marker"),
+                );
+            }
+        }
+        markers
     }
 }
 
@@ -177,13 +200,15 @@ fn converge(
     }
 }
 
-/// Journals an internal transaction without materializing it, the way a crash
-/// between a durable oplog append and the Markdown write leaves the workspace.
-fn journal_internal_without_materializing(
+/// Runs an internal commit of `internal` over `base` and crashes it at
+/// `boundary`, returning the transaction that was interrupted.
+fn commit_internal_crashing_at(
     workspace: &Workspace,
     note_id: NoteId,
+    path: &str,
     base: &str,
     internal: &str,
+    boundary: &str,
 ) -> TransactionId {
     let operations = diff_documents(
         &SourceDocument::parse(base).expect("parse base"),
@@ -198,16 +223,35 @@ fn journal_internal_without_materializing(
         actor: ActorId::new("alice").expect("actor"),
         device: DeviceId::new("desktop").expect("device"),
         note_id,
-        path: note_path(),
+        path: WorkspacePath::new(path).expect("path"),
         expected_hash: ContentHash::digest(base.as_bytes()),
         expected_version: GENESIS,
         operations,
     };
     let transaction_id = request.id;
-    secondbrain_transaction::failpoint::set(Some("after_operations_durable"));
+    secondbrain_transaction::failpoint::set(Some(boundary));
     let error = workspace.engine().commit(request).expect_err("failpoint");
     secondbrain_transaction::failpoint::set(None);
     assert!(matches!(error, TransactionError::Io(_)), "{error}");
+    transaction_id
+}
+
+/// Journals an internal transaction without materializing it, the way a crash
+/// between a durable oplog append and the Markdown write leaves the workspace.
+fn journal_internal_without_materializing(
+    workspace: &Workspace,
+    note_id: NoteId,
+    base: &str,
+    internal: &str,
+) -> TransactionId {
+    let transaction_id = commit_internal_crashing_at(
+        workspace,
+        note_id,
+        NOTE,
+        base,
+        internal,
+        "after_operations_durable",
+    );
     assert_eq!(
         workspace.marker(transaction_id)["state"],
         "OPERATIONS_DURABLE"
@@ -463,6 +507,18 @@ fn ambiguous_duplicate_paragraph_edit_writes_a_review_descriptor_and_leaves_the_
             .contains("ambiguous"),
         "{review}"
     );
+    // The diff layer embeds the whole incoming source in its reason so that
+    // applying a NeedsReview operation can return it. A descriptor says why
+    // review is needed and must not keep a second copy of the note inside
+    // `.secondbrain/`: the note is on disk, and the descriptor is not a backup.
+    let written = fs::read_to_string(&descriptor).expect("read descriptor");
+    assert!(!written.contains("__INCOMING__"), "{written}");
+    for line in external.lines().filter(|line| !line.trim().is_empty()) {
+        assert!(
+            !written.contains(line),
+            "the descriptor embeds the note body: {line:?} in {written}"
+        );
+    }
 
     // Nothing was written, journaled, or converged.
     assert_eq!(workspace.read(NOTE), external);
@@ -775,6 +831,301 @@ fn adopt_external_rejects_operations_whose_post_state_is_not_on_disk() {
     );
     assert_eq!(workspace.read(NOTE), external);
     assert!(workspace.records(note_id).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Crash windows
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_crash_between_the_commit_marker_and_the_converged_base_cannot_replay_the_edit() {
+    let base = fixture("converged-base.md");
+    let internal = fixture("internal-rollout-edit.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+
+    // An internal commit materializes the note, then the process dies before
+    // the state both sides now agree on is durable.
+    let internal_id = commit_internal_crashing_at(
+        &workspace,
+        note_id,
+        NOTE,
+        &base,
+        &internal,
+        "after_commit_before_index",
+    );
+    assert_eq!(workspace.read(NOTE), internal, "the Markdown was written");
+
+    // On restart recovery repairs what the crash left behind. Whatever it
+    // repairs, the converged base must describe the file as it now is: it is
+    // the only record of what the note looked like before the next external
+    // edit lands on top of it.
+    workspace.engine().recover().expect("recover");
+    let recorded = workspace.base_record(note_id);
+    assert_eq!(recorded.source, internal);
+    assert_eq!(recorded.version, NoteVersion::new(1));
+
+    // So the next external event reports no change, instead of re-deriving the
+    // *internal* edit from a stale base and journaling it a second time as the
+    // external actor, at a version another marker already claims.
+    let outcome = coordinator
+        .integrate(changed(NOTE, &internal))
+        .expect("integrate");
+
+    assert_eq!(outcome, ExternalEditOutcome::Unchanged { note_id });
+    let records = workspace.records(note_id);
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].transaction_id, internal_id);
+    let committed: Vec<_> = workspace
+        .markers()
+        .into_iter()
+        .filter(|marker| marker["state"] == "COMMITTED")
+        .collect();
+    assert_eq!(committed.len(), 1, "{committed:?}");
+}
+
+#[test]
+fn a_crash_inside_an_adoption_leaves_the_converged_base_agreeing_with_the_file() {
+    let base = fixture("converged-base.md");
+    let external = fixture("external-paragraph-edit.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+
+    // The adoption dies in the window between its two durable writes.
+    workspace.write(NOTE, &external);
+    secondbrain_transaction::failpoint::set(Some("during_adopt_convergence"));
+    let error = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect_err("failpoint");
+    secondbrain_transaction::failpoint::set(None);
+    assert!(
+        matches!(
+            error,
+            ExternalEditError::Transaction(TransactionError::Io(_))
+        ),
+        "{error}"
+    );
+
+    // Recovery has nothing to do: an adoption never rewrites Markdown, so a
+    // half-finished one is journal records that no marker claims.
+    assert!(workspace.engine().recover().expect("recover").is_empty());
+
+    // Redelivering the event must not journal the same edit again, at a
+    // version a marker already claims.
+    let outcome = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect("integrate");
+
+    assert_eq!(outcome, ExternalEditOutcome::Unchanged { note_id });
+    let records = workspace.records(note_id);
+    assert_eq!(records.len(), 1, "{records:?}");
+    let committed: Vec<_> = workspace
+        .markers()
+        .into_iter()
+        .filter(|marker| marker["state"] == "COMMITTED")
+        .collect();
+    assert!(committed.len() <= 1, "{committed:?}");
+}
+
+#[test]
+fn a_crash_before_the_rebase_is_durable_leaves_the_superseded_transaction_to_recovery() {
+    let base = fixture("converged-base.md");
+    let internal = fixture("internal-rollout-edit.md");
+    let external = fixture("external-paragraph-edit.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+    let internal_id = journal_internal_without_materializing(&workspace, note_id, &base, &internal);
+    workspace.write(NOTE, &external);
+
+    // The rebase that carries the internal operations forward dies before its
+    // own operations are durable.
+    secondbrain_transaction::failpoint::set(Some("before_append"));
+    let error = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect_err("failpoint");
+    secondbrain_transaction::failpoint::set(None);
+    assert!(
+        matches!(
+            error,
+            ExternalEditError::Transaction(TransactionError::Io(_))
+        ),
+        "{error}"
+    );
+
+    // OPERATIONS_DURABLE is the promise that recovery will finish the edit.
+    // Nothing may retract that promise before the transaction carrying those
+    // operations forward is itself durable, or the operations become
+    // unreachable: aborted here, never journaled there.
+    assert_eq!(
+        workspace.marker(internal_id)["state"],
+        "OPERATIONS_DURABLE",
+        "the superseded transaction is recovery's to close out"
+    );
+
+    // Recovery, not the coordinator, decides what becomes of it, through the
+    // state machine it already owns.
+    workspace.engine().recover().expect("recover");
+    assert_eq!(workspace.marker(internal_id)["state"], "ABORTED");
+    assert_eq!(
+        workspace.read(NOTE),
+        external,
+        "recovery preserves the newer file rather than guessing"
+    );
+}
+
+#[test]
+fn one_unreplayable_transaction_does_not_abandon_recovery_for_every_other_note() {
+    const OTHER: &str = "notes/other.md";
+    let base = fixture("converged-base.md");
+    let internal = fixture("internal-rollout-edit.md");
+    let external = fixture("external-paragraph-edit.md");
+    let merged = fixture("merged-migration-and-rollout.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+    let internal_id = journal_internal_without_materializing(&workspace, note_id, &base, &internal);
+    workspace.write(NOTE, &external);
+
+    // The merge lands, and the process dies before the transaction whose
+    // operations it carried forward is closed out.
+    secondbrain_transaction::failpoint::set(Some("after_rebase_before_supersede"));
+    let error = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect_err("failpoint");
+    secondbrain_transaction::failpoint::set(None);
+    assert!(matches!(error, ExternalEditError::Io(_)), "{error}");
+    assert_eq!(workspace.read(NOTE), merged, "the merge is durable");
+    assert_eq!(workspace.marker(internal_id)["state"], "OPERATIONS_DURABLE");
+
+    // An unrelated note is left mid-transaction by the same crash.
+    let other_base = "# Other Notes\n\nDana owns the docs.\n";
+    let other_internal = "# Other Notes\n\nGrace owns the docs.\n";
+    let other_id = converge(&workspace, &mut coordinator, OTHER, other_base);
+    let other_transaction = commit_internal_crashing_at(
+        &workspace,
+        other_id,
+        OTHER,
+        other_base,
+        other_internal,
+        "after_operations_durable",
+    );
+
+    // The superseded operations no longer anchor anywhere in the merged file,
+    // so replaying them is impossible. That must close out one transaction,
+    // not abandon the recovery pass and leave every other note unrecovered.
+    workspace
+        .engine()
+        .recover()
+        .expect("one unreplayable transaction must not fail the pass");
+
+    assert_eq!(workspace.marker(internal_id)["state"], "ABORTED");
+    assert_eq!(workspace.read(NOTE), merged, "the merged file is preserved");
+    assert_eq!(workspace.marker(other_transaction)["state"], "COMMITTED");
+    assert_eq!(
+        workspace.read(OTHER),
+        other_internal,
+        "the unrelated note is recovered"
+    );
+}
+
+#[test]
+fn a_tracked_note_whose_converged_base_was_lost_is_reported_rather_than_registered() {
+    let base = fixture("converged-base.md");
+    let external = fixture("external-paragraph-edit.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+
+    // The converged base is the only record of what the note looked like
+    // before an external edit. Losing it — or having been registered before
+    // this pipeline existed — makes the next edit unrecoverable.
+    fs::remove_file(
+        workspace
+            .root
+            .canonical_path()
+            .join(format!(".secondbrain/snapshots/{note_id}.json")),
+    )
+    .expect("remove converged base");
+    workspace.write(NOTE, &external);
+
+    let outcome = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect("integrate edit with no base");
+
+    // Distinguishable from a first observation: the note was already known, so
+    // an edit was silently dropped rather than a new file simply being adopted.
+    assert_eq!(outcome, ExternalEditOutcome::BaseRecovered { note_id });
+    assert_ne!(
+        outcome,
+        ExternalEditOutcome::Registered { note_id },
+        "losing a base is not the same event as meeting a new file"
+    );
+    // The content on disk becomes the base, and nothing is invented for the
+    // edit that could not be derived.
+    let recorded = workspace.base_record(note_id);
+    assert_eq!(recorded.source, external);
+    assert_eq!(recorded.version, GENESIS);
+    assert_eq!(workspace.read(NOTE), external);
+    assert!(workspace.records(note_id).is_empty());
+
+    // The next edit is derived normally, against the recovered base.
+    let second = fixture("external-second-edit.md");
+    workspace.write(NOTE, &second);
+    let outcome = coordinator
+        .integrate(changed(NOTE, &second))
+        .expect("integrate next edit");
+    assert!(
+        matches!(outcome, ExternalEditOutcome::Adopted { version, .. } if version == NoteVersion::new(1)),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn adopting_no_operations_journals_nothing_and_does_not_bump_the_version() {
+    let base = fixture("converged-base.md");
+    let workspace = workspace();
+    workspace.write(NOTE, &base);
+    let request = TransactionRequest {
+        id: TransactionId::new(),
+        actor: ActorId::new(EXTERNAL_ACTOR).expect("actor"),
+        device: DeviceId::new(DEVICE).expect("device"),
+        note_id: NoteId::new(),
+        path: note_path(),
+        expected_hash: ContentHash::digest(base.as_bytes()),
+        expected_version: NoteVersion::new(4),
+        operations: Vec::new(),
+    };
+    let note_id = request.note_id;
+    let transaction_id = request.id;
+
+    let outcome = workspace
+        .engine()
+        .adopt_external(request, &base)
+        .expect("adopt nothing");
+
+    assert!(!outcome.changed);
+    assert_eq!(
+        outcome.version,
+        NoteVersion::new(4),
+        "there is no version to bump for having journaled nothing"
+    );
+    assert!(workspace.records(note_id).is_empty());
+    assert!(
+        !workspace
+            .root
+            .canonical_path()
+            .join(format!(".secondbrain/transactions/{transaction_id}.json"))
+            .exists(),
+        "an empty adoption is not a transaction"
+    );
 }
 
 #[test]

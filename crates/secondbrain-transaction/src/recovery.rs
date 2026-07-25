@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::base_snapshot::BaseSnapshotStore;
 use crate::engine::{TransactionEngine, TransactionError};
 use crate::oplog::LocalMutationLog;
+use crate::paths;
 
 /// A durable repair performed while recovering interrupted transactions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +88,16 @@ impl TransactionEngine {
 
             let note_path = self.workspace.resolve(&marker.path)?;
             let source = fs::read_to_string(&note_path)?;
-            let materialized = apply_operations(&source, &operations)?;
+            let Ok(materialized) = apply_operations(&source, &operations) else {
+                // The journaled operations no longer describe an edit of the
+                // file on disk — their anchors are gone, because another
+                // transaction carried them forward or rewrote the same text.
+                // That is one transaction's problem: it is aborted, the file
+                // is preserved, and the remaining notes are still recovered.
+                marker.state = "ABORTED".to_owned();
+                persist_marker(&marker_path, &marker)?;
+                continue;
+            };
             if ContentHash::digest(source.as_bytes()) == marker.expected_hash {
                 marker.state = "MATERIALIZING".to_owned();
                 persist_marker(&marker_path, &marker)?;
@@ -146,11 +156,7 @@ impl TransactionEngine {
         &self,
         transaction_id: TransactionId,
     ) -> Result<(), TransactionError> {
-        let marker_path = self
-            .workspace
-            .canonical_path()
-            .join(".secondbrain/transactions")
-            .join(format!("{transaction_id}.json"));
+        let marker_path = paths::marker_path(self.workspace.canonical_path(), transaction_id);
         let mut marker: DurableState = serde_json::from_slice(&fs::read(&marker_path)?)?;
         marker.state = "ABORTED".to_owned();
         persist_marker(&marker_path, &marker)
@@ -158,28 +164,17 @@ impl TransactionEngine {
 
     /// Every transaction marker in the workspace, in deterministic order.
     ///
-    /// A marker is named after its transaction, so anything else in the
-    /// directory — a `<id>.conflict.json` review descriptor, for instance — is
-    /// not a marker and must not be parsed as one.
+    /// The directory also holds review descriptors, which are not markers and
+    /// must not be parsed as one; [`crate::paths::is_marker`] owns that rule.
     fn marker_paths(&self) -> Result<Vec<PathBuf>, TransactionError> {
-        let directory = self
-            .workspace
-            .canonical_path()
-            .join(".secondbrain/transactions");
+        let directory = paths::transactions_dir(self.workspace.canonical_path());
         if !directory.exists() {
             return Ok(Vec::new());
         }
         let mut markers = Vec::new();
         for entry in fs::read_dir(&directory)? {
             let path = entry?.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                continue;
-            }
-            let is_marker = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .is_some_and(|stem| stem.parse::<TransactionId>().is_ok());
-            if is_marker {
+            if paths::is_marker(&path) {
                 markers.push(path);
             }
         }
