@@ -1150,6 +1150,26 @@ fn converge_alpha(vault: &Vault, contents: &str) {
         .success();
 }
 
+/// Every review descriptor filed in a workspace, in deterministic order.
+///
+/// The rule telling a descriptor from a transaction marker is production code's
+/// to state, so this asks rather than restating `<id>.conflict.json`.
+fn review_descriptors(vault: &Vault) -> Vec<PathBuf> {
+    let directory = vault.path().join(".secondbrain/transactions");
+    let mut filed = Vec::new();
+    let Ok(entries) = fs::read_dir(&directory) else {
+        return filed;
+    };
+    for entry in entries {
+        let path = entry.expect("directory entry").path();
+        if secondbrain_transaction::paths::is_review_descriptor(&path) {
+            filed.push(path);
+        }
+    }
+    filed.sort();
+    filed
+}
+
 /// The per-note entry `reconcile` reported for one workspace path.
 fn reconciled<'a>(report: &'a Value, path: &str) -> &'a Value {
     report["notes"]
@@ -1301,7 +1321,7 @@ fn reconcile_merges_an_edit_the_external_write_would_have_clobbered() {
 }
 
 #[test]
-fn reconcile_reports_a_deleted_note_and_stops_the_index_describing_it() {
+fn reconcile_reports_an_absent_note_and_stops_the_index_describing_it() {
     let vault = Vault::indexed();
     converge_alpha(
         &vault,
@@ -1314,12 +1334,12 @@ fn reconcile_reports_a_deleted_note_and_stops_the_index_describing_it() {
 
     assert_eq!(code, OK, "{report}");
     let alpha = reconciled(&report, ALPHA);
-    assert_eq!(alpha["outcome"], "deleted", "{report}");
+    assert_eq!(alpha["outcome"], "absent", "{report}");
     assert!(
         alpha["note_id"].as_str().is_some(),
         "an operator must be told which note the vanished file was: {report}"
     );
-    assert_eq!(report["deleted"], 1, "{report}");
+    assert_eq!(report["absent"], 1, "{report}");
 
     let (code, hits) = run_json(&["search", vault.arg(), "launch"]);
     assert_eq!(code, OK, "{hits}");
@@ -1379,6 +1399,171 @@ fn reconcile_of_an_ambiguous_edit_files_it_for_review_rather_than_guessing() {
     let (code, doctor) = run_json(&["doctor", vault.arg()]);
     assert_eq!(code, DIAGNOSTICS, "{doctor}");
     assert_eq!(doctor["reviews_pending"], 1, "{doctor}");
+}
+
+/// `reconcile` is a routine catch-up pass, so running it twice must cost
+/// nothing.
+///
+/// An operator who puts this in a loop — or a cron job that runs it hourly —
+/// would otherwise file one review descriptor per pass over an ambiguity nobody
+/// has resolved, growing `.secondbrain/transactions/` without bound and driving
+/// `doctor`'s pending-review count up forever over a single undecided change.
+#[test]
+fn reconciling_an_unresolved_review_twice_leaves_one_review_waiting() {
+    let vault = Vault::indexed();
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the rollout.\n\nRepeated.\n",
+    );
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the rollout.\n\nRepeated.\n\nRepeated.\n",
+    );
+    vault.write(
+        ALPHA,
+        "# Alpha\n\nAlpha links to [[beta]] for the rollout.\n\nRepeated.\n\nChanged.\n",
+    );
+
+    let (code, first) = run_json(&["reconcile", vault.arg()]);
+    assert_eq!(code, REVIEW_REQUIRED, "{first}");
+    let descriptor = reconciled(&first, ALPHA)["descriptor_path"]
+        .as_str()
+        .expect("the review is a real artifact a person can open")
+        .to_owned();
+
+    // Nothing resolved the review and nothing touched the note, so the second
+    // pass is being told about the very same undecided change.
+    let (code, second) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, REVIEW_REQUIRED, "{second}");
+    assert_eq!(
+        reconciled(&second, ALPHA)["descriptor_path"],
+        descriptor.as_str(),
+        "a second pass must point at the review already waiting, not open another: {second}"
+    );
+    // Compared by file name: the report names the descriptor through the
+    // canonicalized workspace root, and the temporary directory reaches it
+    // through a symlink.
+    let filed = review_descriptors(&vault);
+    assert_eq!(
+        filed
+            .iter()
+            .map(|path| path.file_name())
+            .collect::<Vec<_>>(),
+        vec![Path::new(&descriptor).file_name()],
+        "one undecided change is one descriptor, however often the pass runs"
+    );
+
+    let (code, doctor) = run_json(&["doctor", vault.arg()]);
+    assert_eq!(code, DIAGNOSTICS, "{doctor}");
+    assert_eq!(
+        doctor["reviews_pending"], 1,
+        "a review count that climbs on its own stops meaning anything: {doctor}"
+    );
+}
+
+/// A note moved outside the workspace is absent from where it was, not deleted.
+///
+/// `reconcile` derives its work from each note's converged base, and a move it
+/// never saw leaves nothing at the path that base names. The identity map is
+/// equally stale, so the pass can name the note confidently — and reporting
+/// that as a *deletion* would tell an operator their note is gone when the file
+/// is sitting intact one directory over. Real rename detection is not the
+/// remedy; saying what is actually known is.
+#[test]
+fn a_note_moved_outside_the_workspace_is_reported_absent_rather_than_deleted() {
+    let vault = Vault::indexed();
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
+    );
+    let converged = vault.read(ALPHA);
+    let note_id = note_id_of(&vault, ALPHA);
+    let moved = "notes/moved.md";
+    fs::rename(vault.path().join(ALPHA), vault.path().join(moved))
+        .expect("an external tool moves the note");
+
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    let alpha = reconciled(&report, ALPHA);
+    assert_eq!(
+        alpha["outcome"], "absent",
+        "a file that is not where it was last seen is absent, not deleted: {report}"
+    );
+    assert_eq!(report["absent"], 1, "{report}");
+    assert!(
+        alpha["note_id"].as_str().is_some(),
+        "an operator must be told which note the path belonged to: {report}"
+    );
+
+    // Nothing was lost: the bytes, the identity, and the converged base are all
+    // still there, which is exactly why "deleted" was the wrong word.
+    assert_eq!(
+        fs::read_to_string(vault.path().join(moved)).expect("the moved file"),
+        converged,
+        "reconcile never touches a note, least of all one it could not find"
+    );
+    let root = vault.root();
+    assert_eq!(
+        secondbrain_vault::IdentityMap::open(&root)
+            .expect("identity map")
+            .note_at(&WorkspacePath::new(ALPHA).expect("path")),
+        Some(note_id),
+        "the note's identity survives a move the workspace never saw"
+    );
+    assert!(
+        secondbrain_vault::BaseSnapshotStore::new(&root)
+            .load(note_id)
+            .expect("load the converged base")
+            .is_some(),
+        "the converged base survives too, so the note stays reconcilable"
+    );
+}
+
+/// A deletion is an outstanding fact, and a fact does not refresh anything.
+///
+/// Phase 0 cannot journal a deletion, so the file's absence is reported on every
+/// pass — but only the first pass has derived state to clean up. Claiming
+/// `index_refreshed` forever would make a routine pass look like work, and it
+/// costs a whole index rebuild each time to say nothing new.
+#[test]
+fn reconciling_a_deleted_note_twice_stops_claiming_it_refreshed_the_index() {
+    let vault = Vault::indexed();
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
+    );
+    fs::remove_file(vault.path().join(ALPHA)).expect("an external editor deletes the note");
+
+    let (code, first) = run_json(&["reconcile", vault.arg()]);
+    assert_eq!(code, OK, "{first}");
+    assert_eq!(reconciled(&first, ALPHA)["outcome"], "absent", "{first}");
+    assert_eq!(
+        first["index_refreshed"], true,
+        "the first pass really does stop the index describing the vanished file: {first}"
+    );
+
+    let (code, second) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, OK, "{second}");
+    assert_eq!(
+        reconciled(&second, ALPHA)["outcome"],
+        "absent",
+        "the file is still gone, and the pass still says so: {second}"
+    );
+    assert_eq!(
+        second["index_refreshed"], false,
+        "a pass that refreshed nothing new must not claim it did: {second}"
+    );
+
+    // And the fact it reports is still true afterwards.
+    let (code, hits) = run_json(&["search", vault.arg(), "launch"]);
+    assert_eq!(code, OK, "{hits}");
+    assert!(
+        hits["hits"].as_array().expect("hits").is_empty(),
+        "a note whose file is gone must stay unfindable: {hits}"
+    );
 }
 
 /// The external-edit pipeline, driven the way an operator drives it.

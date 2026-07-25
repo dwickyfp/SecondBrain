@@ -23,7 +23,7 @@ secondbrain reconcile <workspace>                         # journal the edits ma
 secondbrain doctor <workspace>                            # one report on workspace health
 ```
 
-`--json` is accepted by every command and emits a stable machine contract. Neither form of output ever contains ANSI escapes.
+`--json` is accepted by every command and emits a stable machine contract, documented field by field under [The `--json` contract](#the---json-contract). Neither form of output ever contains ANSI escapes.
 
 ### Previewing and applying a change
 
@@ -44,11 +44,24 @@ An editor that is not this workspace rewrites whole files, so by the time anythi
 secondbrain reconcile vault
 ```
 
-For every note the workspace has converged on at least once, `reconcile` compares the file with that converged base and hands the difference to the external-edit coordinator, which recovers the semantic operations the editor performed and journals them as an attributed transaction. It then refreshes the derived index. Notes are reported one per line — `adopted`, `merged`, `review_required`, `deleted`, or `unchanged` — so an operator can see what happened to each.
+For every note the workspace has converged on at least once, `reconcile` compares the file with that converged base and hands the difference to the external-edit coordinator, which recovers the semantic operations the editor performed and journals them as an attributed transaction. It then refreshes the derived index. Notes are reported one per line — `adopted`, `merged`, `review_required`, `absent`, or `unchanged` — so an operator can see what happened to each.
 
 Three things it deliberately does not do. It never rewrites a note: the editor's bytes are the result, and the workspace is catching up to them. It never touches a note whose file still holds its converged base. And it never guesses at an ambiguous change — that gets a review descriptor and exit code `3`, the same code `diff` uses for the same fact.
 
+It is a routine pass, safe to run repeatedly or from a scheduler. Running it again over an ambiguity nobody has resolved points at the review already waiting rather than filing a second one, and a pass that finds nothing new reports `index_refreshed: false` and rebuilds nothing.
+
 A note the workspace has never converged on has no earlier state to have diverged from, so `reconcile` does not consider it; `diff` and `transaction apply` bring such a note under management by recording its first converged base.
+
+#### `absent` — a note with no file where it was last seen
+
+`reconcile` derives its work from each note's converged base, so what it can observe about a missing note is that nothing is at the path that base names. It reports that as `absent`, and deliberately not as `deleted`, because two different things produce it:
+
+- the file really was deleted, or
+- the file was **moved outside the workspace** by a tool that produced no rename this workspace saw. The note is intact at its new path; the identity map still records the old one, so `reconcile` names the note correctly while pointing at a path it no longer occupies.
+
+Nothing is lost either way — the note's identity and converged base are kept, so a file that comes back, or that a later command finds at its new path, is recognized as the same note. Phase 0 has no delete transaction, so the absence is not journaled and is reported again on every pass until the path is healed. Only the first such pass does any work: once the derived index has stopped describing the path, a later pass has the same fact and nothing to do about it.
+
+Rename detection across a move the workspace never observed is not attempted here.
 
 It is one-shot and local. `sync` is the vocabulary of the network phase and is not spent here.
 
@@ -65,6 +78,46 @@ It is one-shot and local. `sync` is the vocabulary of the network phase and is n
 Code `3` is deliberately distinct from code `1`: a script that cannot tell "needs a person" from "the tool broke" will either page someone for a routine ambiguity or silently drop one. `diff` returns it for a change the semantic diff could not resolve and for a note that diverged from its converged base, `transaction apply` returns it rather than applying such a plan, and `reconcile` returns it when an external edit it integrated had to be filed for review. `reconcile` still prints its full report in that case — the pass completed, and some of it needs a person.
 
 Code `4` means the command ran correctly and is reporting on the workspace: `validate` returns it for notes that do not parse, do not round-trip, or claim an identity another note claims; `recovery check` returns it when an edit was abandoned or a journal was quarantined; `doctor` returns it for workspace-state problems. Broken links and orphaned notes are reported as counts but do not affect the exit code — a vault with broken links is a vault, not a broken workspace.
+
+### The `--json` contract
+
+Every command emits one JSON object on stdout. Field names are stable: a consumer branches on them rather than parsing the human rendering, and both forms are produced from the same value so they cannot disagree about what happened. Optional fields marked *(when applicable)* are **absent**, not `null`, when they do not apply. A failure writes nothing to stdout and emits `{"error":{"code","message"}}` on stderr instead — see [Diagnostic codes](#diagnostic-codes).
+
+| Command | Fields |
+| ------- | ------ |
+| `init` | `workspace`, `workspace_id`, `format_version`, `created_at`, `required_features[]` |
+| `validate` | `workspace`, `workspace_id`, `format_version`, `notes_checked`, `problems[]` of `{path, code, message}` |
+| `index rebuild` | `workspace`, `index` (the SQLite file), `indexed`, `skipped`, `warnings`, `errors`, `orphans`, `broken_links` |
+| `search` | `query`, `hits[]` of `{note_id, path, title, snippet}` |
+| `note inspect` | `note_id`, `path`, `title`, `source_hash`, `converged`, `converged_version` (`null` when no base is recorded), `outgoing_links[]` of `{target, note_id, path, title}`, `backlinks[]` of `{note_id, path, title, target}` |
+| `diff` | the plan itself: `format`, `workspace_id`, `note_id`, `path`, `expected_hash`, `expected_version`, `review_required`, `operations[]` |
+| `diff --out` | `plan` (the file written), `path`, `operations` (a count), `review_required`, `summary` |
+| `transaction apply` | `transaction_id`, `note_id`, `path`, `changed`, `version`, `index_refreshed` |
+| `recovery check` | `workspace`, `actions[]` (below), `index_repairs`, `quarantined`, `abandoned`, `index_refreshed` |
+| `reconcile` | `workspace`, `notes[]` (below), `considered`, `adopted`, `merged`, `reviews_required`, `absent`, `unchanged`, `index_refreshed` |
+| `doctor` | `workspace`, `workspace_id`, `format_version`, `index` of `{present, path, notes, links, broken_links, orphans}`, `transactions` of `{total, committed, aborted, pending, index_repairs_outstanding}`, `reviews_pending`, `problems[]` of `{code, message}` |
+
+`recovery check`'s `actions[]` are tagged by `action`, and carry `transaction_id`, `note_id` and `path` in every kind:
+
+| `action` | Extra fields |
+| -------- | ------------ |
+| `index_repair` | — |
+| `quarantined` | `quarantine_path` |
+| `abandoned` | `reason` (`operations_do_not_anchor` or `unrecognized_file_state`) and `explanation` |
+
+`reconcile`'s `notes[]` are tagged by `outcome`, and carry `path` in every kind:
+
+| `outcome` | Extra fields | Meaning |
+| --------- | ------------ | ------- |
+| `unchanged` | `note_id` | The file still holds the note's converged base, or changed no semantics. |
+| `adopted` | `note_id`, `transaction_id`, `version` | The external edit was journaled as its own transaction. |
+| `merged` | `note_id`, `transaction_id`, `version` | A workspace change the external write had clobbered was rebased onto it. |
+| `review_required` | `transaction_id`, `descriptor_path` | The change was ambiguous; a person must decide. Exits `3`. |
+| `absent` | `note_id` *(when the identity map names one)* | No file at the path the note was last known at. See [`absent`](#absent--a-note-with-no-file-where-it-was-last-seen). |
+| `registered` | `note_id` | A file the workspace had not tracked was given an identity and a base. |
+| `base_recovered` | `note_id` | A tracked note had no base; the content on disk became one, unattributed. |
+| `renamed` | `note_id` | A move the workspace observed; identity and base followed the bytes. |
+| `copied` | `note_id`, `source_note_id` | A copy of a tracked note, given an identity of its own. |
 
 ### Diagnostic codes
 

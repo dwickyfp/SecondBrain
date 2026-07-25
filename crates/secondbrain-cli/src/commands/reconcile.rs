@@ -33,6 +33,25 @@ use crate::exit::{CliError, OK, REVIEW_REQUIRED, read_file};
 use crate::output::{Format, Report, emit, plural};
 use crate::workspace::Workspace;
 
+/// The `outcome` tag of a note the file on disk still agrees with.
+const UNCHANGED: &str = "unchanged";
+/// The `outcome` tag of an external edit journaled as its own transaction.
+const ADOPTED: &str = "adopted";
+/// The `outcome` tag of an external edit journaled over a workspace change that
+/// was rebased onto it.
+const MERGED: &str = "merged";
+/// The `outcome` tag of a change a person must decide.
+const REVIEW: &str = "review_required";
+/// The `outcome` tag of a note with no file where it was last known.
+///
+/// Deliberately not `deleted`. This pass derives its work from each note's
+/// converged base, so all it can observe is that nothing is at the path that
+/// base names. A file the operator deleted looks like this — and so does a file
+/// they moved with a tool the workspace never saw, which is alive and well one
+/// directory over. Naming the first of those would be a confident report of
+/// data loss that has not happened.
+const ABSENT: &str = "absent";
+
 /// What reconciling one note did.
 ///
 /// One flat, tagged object per note rather than a nested shape per kind, so a
@@ -59,12 +78,17 @@ struct ReconciledNote {
 }
 
 impl ReconciledNote {
-    /// The entry for a note whose file still holds its converged base.
-    fn unchanged(path: &WorkspacePath, note_id: NoteId) -> Self {
+    /// An entry whose tag is decided before the value exists.
+    ///
+    /// Every constructor starts here, so this type is never a value with an
+    /// `outcome` that means nothing — not even for the width of a struct
+    /// literal that a later arm is trusted to finish. The per-kind fields are
+    /// added by the builders below, each of which names what it is adding.
+    fn tagged(path: &WorkspacePath, outcome: &'static str) -> Self {
         Self {
             path: path.to_string(),
-            outcome: "unchanged",
-            note_id: Some(note_id),
+            outcome,
+            note_id: None,
             transaction_id: None,
             version: None,
             descriptor_path: None,
@@ -72,86 +96,94 @@ impl ReconciledNote {
         }
     }
 
+    #[must_use]
+    fn of_note(mut self, note_id: NoteId) -> Self {
+        self.note_id = Some(note_id);
+        self
+    }
+
+    /// The transaction the edit was journaled as, and the version it reached.
+    #[must_use]
+    fn journaled(mut self, transaction_id: TransactionId, version: NoteVersion) -> Self {
+        self.transaction_id = Some(transaction_id);
+        self.version = Some(version);
+        self
+    }
+
+    /// The transaction a review is filed under, and the descriptor to open.
+    #[must_use]
+    fn filed_for_review(mut self, transaction_id: TransactionId, descriptor: &Path) -> Self {
+        self.transaction_id = Some(transaction_id);
+        self.descriptor_path = Some(descriptor.display().to_string());
+        self
+    }
+
+    #[must_use]
+    fn copied_from(mut self, source_note_id: NoteId) -> Self {
+        self.source_note_id = Some(source_note_id);
+        self
+    }
+
+    /// The entry for a note whose file still holds its converged base.
+    fn unchanged(path: &WorkspacePath, note_id: NoteId) -> Self {
+        Self::tagged(path, UNCHANGED).of_note(note_id)
+    }
+
+    /// The entry for a note with no file at the path it was last known at.
+    fn absent(path: &WorkspacePath, note_id: NoteId) -> Self {
+        Self::tagged(path, ABSENT).of_note(note_id)
+    }
+
     /// The entry for what the coordinator made of one changed or vanished note.
     fn integrated(path: &WorkspacePath, outcome: &ExternalEditOutcome) -> Self {
-        let base = Self {
-            path: path.to_string(),
-            outcome: "",
-            note_id: None,
-            transaction_id: None,
-            version: None,
-            descriptor_path: None,
-            source_note_id: None,
-        };
         match outcome {
-            ExternalEditOutcome::Registered { note_id } => Self {
-                outcome: "registered",
-                note_id: Some(*note_id),
-                ..base
-            },
-            ExternalEditOutcome::BaseRecovered { note_id } => Self {
-                outcome: "base_recovered",
-                note_id: Some(*note_id),
-                ..base
-            },
-            ExternalEditOutcome::Unchanged { note_id } => Self {
-                outcome: "unchanged",
-                note_id: Some(*note_id),
-                ..base
-            },
+            ExternalEditOutcome::Registered { note_id } => {
+                Self::tagged(path, "registered").of_note(*note_id)
+            }
+            ExternalEditOutcome::BaseRecovered { note_id } => {
+                Self::tagged(path, "base_recovered").of_note(*note_id)
+            }
+            ExternalEditOutcome::Unchanged { note_id } => {
+                Self::tagged(path, UNCHANGED).of_note(*note_id)
+            }
             ExternalEditOutcome::Adopted {
                 note_id,
                 transaction_id,
                 version,
-            } => Self {
-                outcome: "adopted",
-                note_id: Some(*note_id),
-                transaction_id: Some(*transaction_id),
-                version: Some(*version),
-                ..base
-            },
+            } => Self::tagged(path, ADOPTED)
+                .of_note(*note_id)
+                .journaled(*transaction_id, *version),
             ExternalEditOutcome::Merged {
                 note_id,
                 transaction_id,
                 version,
                 ..
-            } => Self {
-                outcome: "merged",
-                note_id: Some(*note_id),
-                transaction_id: Some(*transaction_id),
-                version: Some(*version),
-                ..base
-            },
+            } => Self::tagged(path, MERGED)
+                .of_note(*note_id)
+                .journaled(*transaction_id, *version),
             ExternalEditOutcome::ReviewRequired {
                 transaction_id,
                 descriptor,
-            } => Self {
-                outcome: "review_required",
-                transaction_id: Some(*transaction_id),
-                descriptor_path: Some(descriptor.display().to_string()),
-                ..base
-            },
-            ExternalEditOutcome::Renamed { note_id, path } => Self {
-                path: path.to_string(),
-                outcome: "renamed",
-                note_id: Some(*note_id),
-                ..base
-            },
+            } => Self::tagged(path, REVIEW).filed_for_review(*transaction_id, descriptor),
+            ExternalEditOutcome::Renamed { note_id, path } => {
+                Self::tagged(path, "renamed").of_note(*note_id)
+            }
             ExternalEditOutcome::Copied {
                 note_id,
                 source_note_id,
-            } => Self {
-                outcome: "copied",
-                note_id: Some(*note_id),
-                source_note_id: Some(*source_note_id),
-                ..base
-            },
-            ExternalEditOutcome::Deleted { path, note_id } => Self {
-                path: path.to_string(),
-                outcome: "deleted",
-                note_id: *note_id,
-                ..base
-            },
+            } => Self::tagged(path, "copied")
+                .of_note(*note_id)
+                .copied_from(*source_note_id),
+            // Reported as absence rather than deletion: what the workspace
+            // knows is that no file is at the path this note was last seen at.
+            // See [`ABSENT`].
+            ExternalEditOutcome::Deleted { path, note_id } => {
+                let entry = Self::tagged(path, ABSENT);
+                match note_id {
+                    Some(note_id) => entry.of_note(*note_id),
+                    None => entry,
+                }
+            }
         }
     }
 }
@@ -165,8 +197,15 @@ struct ReconcileReport {
     adopted: usize,
     merged: usize,
     reviews_required: usize,
-    deleted: usize,
+    /// Notes with no file at the path they were last known at. See [`ABSENT`].
+    absent: usize,
     unchanged: usize,
+    /// Whether this pass refreshed the derived index.
+    ///
+    /// False for a pass that found nothing new to do, including one that
+    /// reports the same absence it reported before: a fact restated is not work
+    /// performed, and rebuilding the whole index to discover that would be
+    /// neither cheap nor honest.
     index_refreshed: bool,
 }
 
@@ -192,6 +231,17 @@ impl Report for ReconcileReport {
             if let Some(descriptor) = &note.descriptor_path {
                 text.push_str(&format!("\n      review filed at {descriptor}"));
             }
+        }
+        if self.absent > 0 {
+            text.push_str(&format!(
+                "\n  {}; a note moved out of the workspace by a tool this one never saw \
+                 looks exactly like this",
+                plural(
+                    self.absent,
+                    "note has no file at its last known path",
+                    "notes have no file at their last known paths"
+                )
+            ));
         }
         if self.index_refreshed {
             text.push_str("\n  the index was rebuilt");
@@ -243,10 +293,22 @@ pub fn run(format: Format, workspace: &Path) -> Result<u8, CliError> {
                 path: base.path.clone(),
                 hash,
             })?
-        } else {
+        } else if index_describes(&workspace, &base.path)? {
+            // The whole of what an absence asks for is that nothing derived
+            // keeps describing a file that is not there, and that is the
+            // coordinator's to do.
             coordinator.integrate(WorkspaceEvent::Deleted {
                 path: base.path.clone(),
             })?
+        } else {
+            // Phase 0 cannot journal a deletion, so the absence is outstanding
+            // and gets reported again on every pass. It is only *work* the
+            // first time: once nothing derived points at the path, a later pass
+            // has the same fact and nothing to do about it. Handing it to the
+            // coordinator anyway would rebuild the whole index, forever, to
+            // discover that.
+            notes.push(ReconciledNote::absent(&base.path, base.note_id));
+            continue;
         };
         changed |= !matches!(outcome, ExternalEditOutcome::Unchanged { .. });
         notes.push(ReconciledNote::integrated(&base.path, &outcome));
@@ -260,15 +322,15 @@ pub fn run(format: Format, workspace: &Path) -> Result<u8, CliError> {
     }
 
     let count = |outcome: &str| notes.iter().filter(|note| note.outcome == outcome).count();
-    let reviews_required = count("review_required");
+    let reviews_required = count(REVIEW);
     let report = ReconcileReport {
         workspace: workspace.path().display().to_string(),
         considered: notes.len(),
-        adopted: count("adopted"),
-        merged: count("merged"),
+        adopted: count(ADOPTED),
+        merged: count(MERGED),
         reviews_required,
-        deleted: count("deleted"),
-        unchanged: count("unchanged"),
+        absent: count(ABSENT),
+        unchanged: count(UNCHANGED),
         index_refreshed: changed,
         notes,
     };
@@ -282,4 +344,23 @@ pub fn run(format: Format, workspace: &Path) -> Result<u8, CliError> {
     } else {
         OK
     })
+}
+
+/// Whether the derived index still describes `path`.
+///
+/// This is not a second opinion on whether the note exists — the file's absence
+/// already settled that. It is the question of whether there is any derived
+/// state left to clean up, which is the only thing an absence can ask for while
+/// Phase 0 has no delete transaction. The rule that a vanished file must leave
+/// nothing describing it stays the coordinator's; this only decides whether
+/// there is anything for it to do.
+///
+/// A workspace with no index at all describes nothing, so there is nothing to
+/// clean up there either.
+fn index_describes(workspace: &Workspace, path: &WorkspacePath) -> Result<bool, CliError> {
+    match workspace.open_index() {
+        Ok(database) => Ok(database.note_by_path(path.as_str())?.is_some()),
+        Err(CliError::IndexMissing(_)) => Ok(false),
+        Err(error) => Err(error),
+    }
 }

@@ -208,6 +208,25 @@ impl Workspace {
         self.base_record(note_id).source
     }
 
+    /// Every review descriptor filed in the workspace, in deterministic order.
+    fn review_descriptors(&self) -> Vec<PathBuf> {
+        let directory = self.root.canonical_path().join(".secondbrain/transactions");
+        let mut filed = Vec::new();
+        let Ok(entries) = fs::read_dir(&directory) else {
+            return filed;
+        };
+        for entry in entries {
+            let path = entry.expect("entry").path();
+            // The rule telling a descriptor from a marker is production code's
+            // to state, not this harness's to restate.
+            if secondbrain_transaction::paths::is_review_descriptor(&path) {
+                filed.push(path);
+            }
+        }
+        filed.sort();
+        filed
+    }
+
     /// Every transaction marker in the workspace, whichever note it belongs to.
     fn markers(&self) -> Vec<serde_json::Value> {
         let directory = self.root.canonical_path().join(".secondbrain/transactions");
@@ -586,6 +605,81 @@ fn ambiguous_duplicate_paragraph_edit_writes_a_review_descriptor_and_leaves_the_
             .canonical_path()
             .join(format!(".secondbrain/transactions/{transaction_id}.json"))
             .exists()
+    );
+}
+
+/// A review nobody has resolved is one review, however often it is re-observed.
+///
+/// Every caller of this coordinator hands it the same unresolved state again:
+/// a watcher re-delivering an event, a `reconcile` pass run from a cron job, a
+/// desktop app restarting. If each of those files another descriptor, the
+/// workspace's count of "changes waiting on a person" climbs without a person
+/// ever having been asked anything new, and the number stops meaning anything.
+#[test]
+fn re_observing_the_same_ambiguity_files_one_review_rather_than_one_per_pass() {
+    let base = fixture("duplicate-paragraph-base.md");
+    let external = fixture("duplicate-paragraph-external.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    converge(&workspace, &mut coordinator, NOTE, &base);
+    workspace.write(NOTE, &external);
+
+    let first = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect("integrate the ambiguous edit");
+    // Nothing resolved the review and nothing touched the file, so this pass is
+    // being told about the very same ambiguity.
+    let second = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect("integrate the same ambiguous edit again");
+
+    assert_eq!(
+        first, second,
+        "re-filing the same review must be idempotent, transaction id included"
+    );
+    assert_eq!(
+        workspace.review_descriptors().len(),
+        1,
+        "an unresolved review must not grow one descriptor per pass"
+    );
+    assert_eq!(
+        workspace
+            .engine()
+            .pending_reviews()
+            .expect("pending reviews")
+            .len(),
+        1,
+        "a pending-review count that climbs on its own stops meaning anything"
+    );
+}
+
+/// The guard against over-deduplicating: a different decision is a new review.
+#[test]
+fn an_ambiguity_over_different_content_is_a_review_of_its_own() {
+    let base = fixture("duplicate-paragraph-base.md");
+    let external = fixture("duplicate-paragraph-external.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    converge(&workspace, &mut coordinator, NOTE, &base);
+
+    workspace.write(NOTE, &external);
+    coordinator
+        .integrate(changed(NOTE, &external))
+        .expect("integrate the ambiguous edit");
+    // The editor saved again, still ambiguously, but over different content.
+    // A person deciding the first one has not decided this one.
+    let later = "Duplicate.\n\nSome middle.\n\nAltered.\n";
+    workspace.write(NOTE, later);
+    coordinator
+        .integrate(changed(NOTE, later))
+        .expect("integrate the later ambiguous edit");
+
+    assert_eq!(
+        workspace.review_descriptors().len(),
+        2,
+        "a second, different ambiguity is a second decision a person must make"
     );
 }
 

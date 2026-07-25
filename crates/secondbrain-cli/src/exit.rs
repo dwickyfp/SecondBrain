@@ -155,66 +155,73 @@ mod tests {
         serde_json::from_str::<serde_json::Value>("{").expect_err("fixture must be invalid")
     }
 
-    /// Every `CliError` variant beside the exact code it must keep answering.
+    /// The sample this walk starts from.
     ///
-    /// Written the way `secondbrain-core`'s `error_contract.rs` is written, and
-    /// for the same reason: an operator scripts against these codes, so a
-    /// variant that quietly changed which one it answers would break a caller
-    /// that never saw a compiler error.
-    fn every_variant() -> Vec<(CliError, &'static str)> {
-        vec![
-            (
-                CliError::Core(secondbrain_core::Error::CorruptRecord {
-                    record: "note:01ARZ3NDEKTSV4RRFFQ69G5FAV".into(),
-                    summary: "content hash mismatch".into(),
-                }),
-                "SB-STORE-CORRUPT",
-            ),
-            (
+    /// [`next_variant`] carries it the rest of the way, one variant per step.
+    fn first_variant() -> (CliError, &'static str) {
+        (
+            CliError::Core(secondbrain_core::Error::CorruptRecord {
+                record: "note:01ARZ3NDEKTSV4RRFFQ69G5FAV".into(),
+                summary: "content hash mismatch".into(),
+            }),
+            "SB-STORE-CORRUPT",
+        )
+    }
+
+    /// The sample of the variant after `previous`, or `None` at the end.
+    ///
+    /// This `match` is exhaustive over `CliError`, and that is the whole point:
+    /// a variant added to the enum stops this file compiling until somebody
+    /// decides what it is a sample of. The list it replaced was a `Vec` literal
+    /// that a new variant could sail past, which meant the contract test could
+    /// not fail for the one case it exists to catch.
+    fn next_variant(previous: &CliError) -> Option<(CliError, &'static str)> {
+        Some(match previous {
+            CliError::Core(_) => (
                 CliError::Index(secondbrain_index::IndexError::MalformedNote {
                     path: "notes/broken.md".into(),
                     message: "unterminated front matter".into(),
                 }),
                 "SB-INDEX",
             ),
-            (
+            CliError::Index(_) => (
                 CliError::IndexQuery(secondbrain_index::Error::InvalidStoredNoteId {
                     value: "not-a-ulid".into(),
                 }),
                 "SB-INDEX",
             ),
-            (
+            CliError::IndexQuery(_) => (
                 CliError::Transaction(secondbrain_transaction::TransactionError::VersionOverflow),
                 "SB-TXN",
             ),
-            (
+            CliError::Transaction(_) => (
                 CliError::Snapshot(secondbrain_vault::SnapshotError::UnsupportedFormat {
                     note_id: NoteId::new(),
                     format: "sb-base-snapshot-v2".into(),
                 }),
                 "SB-TXN",
             ),
-            (
+            CliError::Snapshot(_) => (
                 CliError::ExternalEdit(secondbrain_transaction::ExternalEditError::Transaction(
                     secondbrain_transaction::TransactionError::VersionOverflow,
                 )),
                 "SB-TXN",
             ),
-            (
+            CliError::ExternalEdit(_) => (
                 CliError::Markdown(secondbrain_markdown::parse::ParseError::UpstreamPanic(
                     "the parser gave up".into(),
                 )),
                 "SB-MD-INVALID",
             ),
-            (
+            CliError::Markdown(_) => (
                 CliError::Identity(
                     secondbrain_core::actor::ActorId::new("")
                         .expect_err("an empty actor is invalid"),
                 ),
                 "SB-ID-INVALID",
             ),
-            (CliError::Encode(malformed_json()), "SB-OUTPUT-ENCODE"),
-            (
+            CliError::Identity(_) => (CliError::Encode(malformed_json()), "SB-OUTPUT-ENCODE"),
+            CliError::Encode(_) => (
                 CliError::Io {
                     operation: "read note",
                     path: PathBuf::from("notes/alpha.md"),
@@ -222,48 +229,91 @@ mod tests {
                 },
                 "SB-IO",
             ),
-            (
+            CliError::Io { .. } => (
                 CliError::IndexMissing(PathBuf::from(".secondbrain/index.sqlite")),
                 "SB-INDEX-MISSING",
             ),
-            (
-                CliError::Core(secondbrain_core::Error::NoteNotIndexed {
-                    path: PathBuf::from("notes/alpha.md"),
-                }),
-                "SB-NOTE-NOT-INDEXED",
-            ),
-            (
+            CliError::IndexMissing(_) => (
                 CliError::PlanUnreadable {
                     source: malformed_json(),
                 },
                 "SB-PLAN-INVALID",
             ),
-            (
+            CliError::PlanUnreadable { .. } => (
                 CliError::PlanFormat {
                     expected: "sb-transaction-plan-v1",
                     found: "sb-transaction-plan-v2".into(),
                 },
                 "SB-PLAN-INVALID",
             ),
-            (
+            CliError::PlanFormat { .. } => (
                 CliError::PlanWorkspace {
                     plan: WorkspaceId::new(),
                     workspace: WorkspaceId::new(),
                 },
                 "SB-PLAN-INVALID",
             ),
-            (
+            CliError::PlanWorkspace { .. } => (
                 CliError::ReviewRequired("two paragraphs are identical".into()),
                 "SB-REVIEW-REQUIRED",
             ),
-            (
-                CliError::Core(secondbrain_core::Error::NoteDiverged {
-                    path: PathBuf::from("notes/alpha.md"),
-                    version: NoteVersion::new(1),
-                }),
-                "SB-NOTE-DIVERGED",
-            ),
-        ]
+            CliError::ReviewRequired(_) => return None,
+        })
+    }
+
+    /// Every `CliError` variant beside the exact code it must keep answering.
+    ///
+    /// Written the way `secondbrain-core`'s `error_contract.rs` is written, and
+    /// for the same reason: an operator scripts against these codes, so a
+    /// variant that quietly changed which one it answers would break a caller
+    /// that never saw a compiler error.
+    ///
+    /// Built by walking [`next_variant`], so the list cannot fall behind the
+    /// enum. The two conditions appended afterwards are not variants of their
+    /// own — they are the nested `secondbrain_core::Error` cases this binary
+    /// must keep reporting under the taxonomy's codes rather than one of its
+    /// own, which is what `CliError::Core`'s single sample cannot pin.
+    fn every_variant() -> Vec<(CliError, &'static str)> {
+        let mut all = vec![first_variant()];
+        while let Some(next) = next_variant(&all.last().expect("the walk starts with one sample").0)
+        {
+            all.push(next);
+        }
+        all.push((
+            CliError::Core(secondbrain_core::Error::NoteNotIndexed {
+                path: PathBuf::from("notes/alpha.md"),
+            }),
+            "SB-NOTE-NOT-INDEXED",
+        ));
+        all.push((
+            CliError::Core(secondbrain_core::Error::NoteDiverged {
+                path: PathBuf::from("notes/alpha.md"),
+                version: NoteVersion::new(1),
+            }),
+            "SB-NOTE-DIVERGED",
+        ));
+        all
+    }
+
+    /// The walk visits each variant at most once.
+    ///
+    /// A `next_variant` arm that pointed backwards would make `every_variant`
+    /// loop forever, and a test suite that hangs says nothing. `std::mem::
+    /// discriminant` compares variants without naming them, so this keeps
+    /// holding whatever is added.
+    #[test]
+    fn the_walk_over_the_variants_terminates() {
+        let mut seen: Vec<std::mem::Discriminant<CliError>> = Vec::new();
+        let mut current = Some(first_variant().0);
+        while let Some(error) = current {
+            let discriminant = std::mem::discriminant(&error);
+            assert!(
+                !seen.contains(&discriminant),
+                "the walk revisits a variant and would never terminate: {error:?}"
+            );
+            seen.push(discriminant);
+            current = next_variant(&error).map(|(error, _)| error);
+        }
     }
 
     #[test]

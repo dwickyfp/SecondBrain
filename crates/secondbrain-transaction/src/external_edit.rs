@@ -43,7 +43,7 @@ use secondbrain_vault::base_snapshot::{
 use secondbrain_vault::event::WorkspaceEvent;
 use secondbrain_vault::watcher::WorkspaceWatcher;
 use secondbrain_vault::{IdentityMap, RecoveryOutcome, WorkspaceRoot};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::engine::{TransactionEngine, TransactionError, TransactionRequest};
@@ -220,14 +220,24 @@ pub enum ExternalEditOutcome {
         /// The note the copy was made from.
         source_note_id: NoteId,
     },
-    /// A file was removed. Phase 0 has no delete transaction, so the deletion
-    /// is not journaled; identity and converged base are kept so the note is
-    /// recovered if the file comes back. The derived index is refreshed, so
-    /// nothing keeps describing a file that is not there.
+    /// No file is at the path any more.
+    ///
+    /// This is an *absence*, not a proven deletion, and a caller reporting it
+    /// to a person should say so: the same observation is produced by a file
+    /// the operator deleted and by one they moved with a tool that produced no
+    /// rename event this coordinator saw, which is intact at its new path.
+    ///
+    /// Phase 0 has no delete transaction, so nothing is journaled; identity and
+    /// converged base are kept so the note is recovered if the file comes back
+    /// — or, in the move case, so it is still the same note when something
+    /// notices where it went. The derived index is refreshed, so nothing keeps
+    /// describing a file that is not there.
     Deleted {
-        /// The path that disappeared.
+        /// The path with no file at it.
         path: WorkspacePath,
-        /// The note that lived there, when the identity map names exactly one.
+        /// The note last known to live there, when the identity map names
+        /// exactly one. It is what the map still records, which after an
+        /// unobserved move is a path the note no longer occupies.
         note_id: Option<NoteId>,
     },
 }
@@ -642,6 +652,14 @@ impl<R: IndexRefresh, W: InternalWriteReceipts> ExternalEditCoordinator<R, W> {
 
     /// Files a review descriptor next to the transaction markers and leaves the
     /// file on disk untouched.
+    ///
+    /// Filing is idempotent, keyed on the review itself rather than on the
+    /// occasion of noticing it. Every caller hands the same unresolved state
+    /// back sooner or later — a watcher re-delivering an event, a reconciliation
+    /// pass run from a cron job, a desktop app restarting — and a descriptor per
+    /// occasion would grow `.secondbrain/transactions/` without bound while a
+    /// count of "changes waiting on a person" climbed without a person ever
+    /// having been asked anything new.
     fn require_review(
         &self,
         note_id: Option<NoteId>,
@@ -650,6 +668,15 @@ impl<R: IndexRefresh, W: InternalWriteReceipts> ExternalEditCoordinator<R, W> {
         reason: String,
         identity_candidates: Vec<NoteId>,
     ) -> Result<ExternalEditOutcome, ExternalEditError> {
+        if let Some(filed) = self.review_already_filed(note_id, path, source_hash)? {
+            return Ok(ExternalEditOutcome::ReviewRequired {
+                descriptor: paths::review_descriptor_path(
+                    self.workspace.canonical_path(),
+                    filed.transaction_id,
+                ),
+                transaction_id: filed.transaction_id,
+            });
+        }
         let transaction_id = TransactionId::new();
         let descriptor = ReviewDescriptor {
             format: REVIEW_FORMAT,
@@ -673,6 +700,47 @@ impl<R: IndexRefresh, W: InternalWriteReceipts> ExternalEditCoordinator<R, W> {
             transaction_id,
             descriptor: target,
         })
+    }
+
+    /// The descriptor already asking a person the question this review would
+    /// ask, if one is on disk.
+    ///
+    /// A descriptor this build cannot read is not evidence of anything and is
+    /// skipped. Filing a second descriptor is the safe direction to be wrong in:
+    /// a review recorded twice is noise, whereas a review recorded nowhere is a
+    /// decision nobody will ever be asked to make.
+    fn review_already_filed(
+        &self,
+        note_id: Option<NoteId>,
+        path: &WorkspacePath,
+        source_hash: ContentHash,
+    ) -> Result<Option<FiledReview>, ExternalEditError> {
+        let directory = paths::transactions_dir(self.workspace.canonical_path());
+        if !directory.exists() {
+            return Ok(None);
+        }
+        let mut descriptors: Vec<PathBuf> = fs::read_dir(&directory)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+        // Deterministic, so that a workspace which somehow holds two matching
+        // descriptors keeps answering with the same one.
+        descriptors.sort();
+        for descriptor in descriptors {
+            if !paths::is_review_descriptor(&descriptor) {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&descriptor) else {
+                continue;
+            };
+            let Ok(filed) = serde_json::from_slice::<FiledReview>(&bytes) else {
+                continue;
+            };
+            if filed.format == REVIEW_FORMAT && filed.is_the_same_review(note_id, path, source_hash)
+            {
+                return Ok(Some(filed));
+            }
+        }
+        Ok(None)
     }
 
     /// Records a file's current content as the base future edits are diffed
@@ -773,6 +841,42 @@ struct ReviewDescriptor<'a> {
     reason: String,
     source_hash: ContentHash,
     identity_candidates: Vec<NoteId>,
+}
+
+/// A descriptor already on disk, read back for the fields that identify which
+/// review it is.
+///
+/// Only the identifying fields are read: the rest of a descriptor is for the
+/// person resolving it, and this type exists to answer one question — has this
+/// review been filed already? A descriptor whose `format` this build does not
+/// know is not comparable and is treated as no answer.
+#[derive(Deserialize)]
+struct FiledReview {
+    format: String,
+    transaction_id: TransactionId,
+    note_id: Option<NoteId>,
+    path: WorkspacePath,
+    source_hash: ContentHash,
+}
+
+impl FiledReview {
+    /// Whether this is the same review as one about to be filed.
+    ///
+    /// Two reviews are the same when they are about the same note, at the same
+    /// path, over the same content — that triple is the whole of what a person
+    /// is being asked to decide. Any of the three differing is a different
+    /// decision, and deciding the first would not have decided the second, so
+    /// it gets a descriptor of its own. The note is carried as an `Option`
+    /// because identity is itself one of the things a review can be about,
+    /// and two files whose identity is unresolved are told apart by their path.
+    fn is_the_same_review(
+        &self,
+        note_id: Option<NoteId>,
+        path: &WorkspacePath,
+        source_hash: ContentHash,
+    ) -> bool {
+        self.note_id == note_id && self.path == *path && self.source_hash == source_hash
+    }
 }
 
 /// The reason review is required, if any operation demands it.
