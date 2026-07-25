@@ -7,11 +7,14 @@
 //! This format is **not** a network envelope — it is for local persistence only.
 
 pub mod engine;
+pub mod failpoint;
 pub mod oplog;
 pub mod record;
+pub mod recovery;
 pub mod state;
 
 pub use engine::{CommitOutcome, TransactionEngine, TransactionError, TransactionRequest};
+pub use recovery::RecoveryAction;
 pub use state::{StateTransitionError, TransactionState};
 
 pub use record::{

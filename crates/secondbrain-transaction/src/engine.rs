@@ -13,6 +13,7 @@ use secondbrain_vault::WorkspaceRoot;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::failpoint;
 use crate::oplog::{LocalMutationLog, OplogError};
 use crate::record::{FORMAT_VERSION_1, LocalOperationRecord, RecordEncodeError};
 use crate::state::{StateTransitionError, TransactionState};
@@ -65,7 +66,7 @@ pub enum TransactionError {
 
 /// Commits transactions within one workspace.
 pub struct TransactionEngine {
-    workspace: WorkspaceRoot,
+    pub(crate) workspace: WorkspaceRoot,
     workspace_id: WorkspaceId,
 }
 
@@ -110,7 +111,7 @@ impl TransactionEngine {
             .ok_or(TransactionError::VersionOverflow)?;
 
         let mut state = TransactionState::Prepared;
-        self.persist_state(&request, state, version)?;
+        self.persist_state(&request, state, version, false)?;
 
         let mut log = LocalMutationLog::open(self.workspace.canonical_path(), request.note_id)?;
         let replay = log.replay()?;
@@ -123,6 +124,7 @@ impl TransactionEngine {
             .last()
             .map(|record| record.encode().map(ContentHash::digest))
             .transpose()?;
+        failpoint::hit("before_append")?;
         for operation in &request.operations {
             let record = LocalOperationRecord {
                 format_version: FORMAT_VERSION_1,
@@ -140,15 +142,21 @@ impl TransactionEngine {
             previous_record_hash = Some(ContentHash::digest(record.encode()?));
             sequence += 1;
         }
+        failpoint::hit("after_append_before_state")?;
 
         state.transition_to(TransactionState::OperationsDurable)?;
-        self.persist_state(&request, state, version)?;
+        self.persist_state(&request, state, version, false)?;
+        failpoint::hit("after_operations_durable")?;
         state.transition_to(TransactionState::Materializing)?;
-        self.persist_state(&request, state, version)?;
+        self.persist_state(&request, state, version, false)?;
+        failpoint::hit("during_temp_markdown_write")?;
         self.workspace
             .atomic_write(&request.path, materialized.as_bytes())?;
+        failpoint::hit("after_rename_before_commit")?;
         state.transition_to(TransactionState::Committed)?;
-        self.persist_state(&request, state, version)?;
+        self.persist_state(&request, state, version, false)?;
+        failpoint::hit("after_commit_before_index")?;
+        self.persist_state(&request, state, version, true)?;
 
         Ok(CommitOutcome {
             changed: true,
@@ -161,6 +169,7 @@ impl TransactionEngine {
         request: &TransactionRequest,
         state: TransactionState,
         version: NoteVersion,
+        index_repaired: bool,
     ) -> Result<(), TransactionError> {
         #[derive(Serialize)]
         struct DurableState<'a> {
@@ -171,6 +180,7 @@ impl TransactionEngine {
             expected_hash: ContentHash,
             expected_version: NoteVersion,
             committed_version: NoteVersion,
+            index_repaired: bool,
         }
         let bytes = serde_json::to_vec_pretty(&DurableState {
             transaction_id: request.id,
@@ -180,6 +190,7 @@ impl TransactionEngine {
             expected_hash: request.expected_hash,
             expected_version: request.expected_version,
             committed_version: version,
+            index_repaired,
         })?;
         let directory = self
             .workspace
