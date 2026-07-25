@@ -689,6 +689,123 @@ fn a_rename_that_also_changes_content_converges_the_base_with_the_file() {
     );
 }
 
+#[test]
+fn a_rename_whose_new_content_duplicates_another_note_keeps_its_own_identity() {
+    const OTHER: &str = "notes/other.md";
+    let base = fixture("converged-base.md");
+    // Another tracked note happens to hold exactly the content the move is
+    // about to produce, so re-resolving identity at the new path would find
+    // byte-for-byte evidence pointing at a note this file does not belong to.
+    let duplicate = fixture("converged-base.md") + "\nDana owns the docs.\n";
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+    let other_id = converge(&workspace, &mut coordinator, OTHER, &duplicate);
+
+    fs::create_dir_all(workspace.absolute("archive")).expect("create archive");
+    fs::remove_file(workspace.absolute(NOTE)).expect("remove the old path");
+    workspace.write("archive/meeting.md", &duplicate);
+    let renamed = WorkspacePath::new("archive/meeting.md").expect("renamed path");
+
+    let outcome = coordinator
+        .integrate(WorkspaceEvent::Renamed {
+            from: note_path(),
+            to: renamed.clone(),
+        })
+        .expect("integrate rename");
+
+    // The identity was resolved once, for the file that moved. Minting a
+    // second id for a path that already belongs to the moved note would leave
+    // two notes claiming one file.
+    assert!(
+        matches!(outcome, ExternalEditOutcome::Adopted { note_id: adopted, .. }
+            if adopted == note_id),
+        "{outcome:?}"
+    );
+    let identity = IdentityMap::open(&workspace.root).expect("identity map");
+    assert_eq!(
+        identity
+            .lookup(&note_id)
+            .expect("lookup")
+            .expect("record")
+            .current_path,
+        renamed
+    );
+    assert_eq!(
+        identity
+            .lookup(&other_id)
+            .expect("lookup")
+            .expect("record")
+            .current_path,
+        WorkspacePath::new(OTHER).unwrap(),
+        "the note that did not move keeps its path"
+    );
+    assert_ne!(other_id, note_id);
+    assert_eq!(workspace.base(note_id), duplicate);
+}
+
+#[test]
+fn a_rename_onto_a_path_another_note_once_held_does_not_re_resolve_identity() {
+    const OTHER: &str = "notes/other.md";
+    let base = fixture("converged-base.md");
+    let external = fixture("external-paragraph-edit.md");
+    let other_source = "# Other Notes\n\nDana owns the docs.\n";
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+    let other_id = converge(&workspace, &mut coordinator, OTHER, other_source);
+
+    // The other note vacates `notes/other.md`, which stays in its path history.
+    fs::rename(
+        workspace.absolute(OTHER),
+        workspace.absolute("archive-other.md"),
+    )
+    .expect("vacate the path");
+    coordinator
+        .integrate(WorkspaceEvent::Renamed {
+            from: WorkspacePath::new(OTHER).expect("path"),
+            to: WorkspacePath::new("archive-other.md").expect("path"),
+        })
+        .expect("integrate the first rename");
+
+    // Now the tracked note moves into that freed path and changes its bytes.
+    fs::remove_file(workspace.absolute(NOTE)).expect("remove the old path");
+    workspace.write(OTHER, &external);
+    let renamed = WorkspacePath::new(OTHER).expect("path");
+    let outcome = coordinator
+        .integrate(WorkspaceEvent::Renamed {
+            from: note_path(),
+            to: renamed.clone(),
+        })
+        .expect("integrate rename");
+
+    // Re-resolving identity under the new path would find two records naming
+    // it — the note that just moved there and the note that used to live there
+    // — and file the change for review instead of integrating it, even though
+    // the caller had already established whose file this is.
+    assert!(
+        matches!(outcome, ExternalEditOutcome::Adopted { note_id: adopted, .. }
+            if adopted == note_id),
+        "{outcome:?}"
+    );
+    assert_eq!(workspace.base(note_id), external);
+    assert_eq!(
+        workspace.base(other_id),
+        other_source,
+        "the note that vacated the path is untouched"
+    );
+    assert!(
+        workspace
+            .markers()
+            .iter()
+            .all(|marker| marker["state"] == "COMMITTED"),
+        "{:?}",
+        workspace.markers()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Case 6: an external copy gets a new ID
 // ---------------------------------------------------------------------------

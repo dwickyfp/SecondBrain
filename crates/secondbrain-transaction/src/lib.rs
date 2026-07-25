@@ -10,6 +10,7 @@ pub mod base_snapshot;
 pub mod engine;
 pub mod external_edit;
 pub mod failpoint;
+mod marker;
 pub mod oplog;
 pub mod paths;
 pub mod record;

@@ -1,16 +1,17 @@
 //! Deterministic recovery for interrupted single-note transactions.
 
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use secondbrain_core::hash::ContentHash;
-use secondbrain_core::id::{NoteId, NoteVersion, TransactionId};
+use secondbrain_core::id::{NoteId, TransactionId};
 use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::apply::apply_operations;
-use serde::{Deserialize, Serialize};
 
 use crate::base_snapshot::BaseSnapshotStore;
 use crate::engine::{TransactionEngine, TransactionError};
+use crate::marker::DurableState;
 use crate::oplog::LocalMutationLog;
 use crate::paths;
 
@@ -24,10 +25,16 @@ pub enum RecoveryAction {
         path: WorkspacePath,
     },
     /// An invalid journal suffix was preserved and the transaction was aborted.
+    ///
+    /// `path` is the note, as it is for every other variant, so a formatter can
+    /// answer "which note did this happen to" without special-casing. The
+    /// preserved journal suffix lives inside `.secondbrain/` and is not a note
+    /// path at all, so it is named for what it is.
     Quarantined {
         transaction_id: TransactionId,
         note_id: NoteId,
-        path: PathBuf,
+        path: WorkspacePath,
+        quarantine_path: PathBuf,
     },
     /// A durably journaled edit could not be replayed and was abandoned.
     ///
@@ -57,24 +64,24 @@ pub enum AbandonedReason {
     UnrecognizedFileState,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DurableState {
-    transaction_id: TransactionId,
-    note_id: NoteId,
-    path: WorkspacePath,
-    state: String,
-    expected_hash: ContentHash,
-    /// Hash of the content this transaction's operations produce, recorded
-    /// before the Markdown was written.
-    ///
-    /// Absent only on markers written before the engine recorded it, which are
-    /// recovered by the pre-state and idempotence rules alone.
-    #[serde(default)]
-    materialized_hash: Option<ContentHash>,
-    expected_version: NoteVersion,
-    committed_version: NoteVersion,
-    #[serde(default)]
-    index_repaired: bool,
+impl fmt::Display for AbandonedReason {
+    /// Says what happened and what it means for the operator's data, because
+    /// this is what a `recovery check` prints to a human.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::OperationsDoNotAnchor => {
+                "the text this edit was written against is no longer in the note, \
+                 so the edit could not be replayed; the file on disk is untouched \
+                 and the edit is lost"
+            }
+            Self::UnrecognizedFileState => {
+                "the note holds neither the content this edit started from nor the \
+                 content it would produce, so replaying it would have overwritten \
+                 changes nothing accounts for; the file on disk is untouched and \
+                 the edit is lost"
+            }
+        })
+    }
 }
 
 impl TransactionEngine {
@@ -102,7 +109,8 @@ impl TransactionEngine {
                 actions.push(RecoveryAction::Quarantined {
                     transaction_id: marker.transaction_id,
                     note_id: marker.note_id,
-                    path: corruption.quarantine_path,
+                    path: marker.path.clone(),
+                    quarantine_path: corruption.quarantine_path,
                 });
                 continue;
             }
@@ -122,12 +130,12 @@ impl TransactionEngine {
             let note_path = self.workspace.resolve(&marker.path)?;
             let source = fs::read_to_string(&note_path)?;
             let source_hash = ContentHash::digest(source.as_bytes());
-            let materialized = if marker.materialized_hash == Some(source_hash) {
+            let materialized = if marker.materialized_hash == source_hash {
                 // The file is this transaction's own result, identified by the
                 // hash its marker recorded before the Markdown write. That is
-                // a positive test: re-applying the operations to decide the
-                // same thing only works for operations that happen to be
-                // idempotent, and a `ReplaceNode` anchors on the text it
+                // the *only* positive test: re-applying the operations to
+                // decide the same thing only works for operations that happen
+                // to be idempotent, and a `ReplaceNode` anchors on the text it
                 // replaces, which its own post-state no longer contains.
                 source.clone()
             } else if source_hash == marker.expected_hash {
@@ -146,31 +154,25 @@ impl TransactionEngine {
                     .atomic_write(&marker.path, materialized.as_bytes())?;
                 materialized
             } else {
-                // Neither state the marker names. The operations may still be
-                // idempotent against the file — a marker predating
-                // `materialized_hash` is recovered that way — but anything
-                // else is newer data, preserved rather than overwritten.
-                let Ok(materialized) = apply_operations(&source, &operations) else {
-                    // Their anchors are gone, because another transaction
-                    // carried them forward or rewrote the same text. That is
-                    // one transaction's problem: it is aborted, the file is
-                    // preserved, and the remaining notes are still recovered.
-                    actions.push(abandon(
-                        &mut marker,
-                        &marker_path,
-                        AbandonedReason::OperationsDoNotAnchor,
-                    )?);
-                    continue;
+                // Neither this transaction's own result nor the pre-state it
+                // recorded. Re-applying the operations here would decide the
+                // question by idempotence, which can agree with content this
+                // transaction never produced — committing over a third party
+                // and adopting their bytes as this note's converged base. The
+                // recorded hashes are the only evidence about what this
+                // transaction wrote, and they both say no.
+                //
+                // Replaying is still worth doing to tell the operator *why*
+                // the edit was abandoned — whether its anchors are gone or the
+                // file is simply in a state recovery cannot place — but the
+                // result is never written.
+                let reason = if apply_operations(&source, &operations).is_ok() {
+                    AbandonedReason::UnrecognizedFileState
+                } else {
+                    AbandonedReason::OperationsDoNotAnchor
                 };
-                if materialized != source {
-                    actions.push(abandon(
-                        &mut marker,
-                        &marker_path,
-                        AbandonedReason::UnrecognizedFileState,
-                    )?);
-                    continue;
-                }
-                materialized
+                actions.push(abandon(&mut marker, &marker_path, reason)?);
+                continue;
             };
 
             marker.state = "COMMITTED".to_owned();
@@ -270,8 +272,10 @@ fn abandon(
     })
 }
 
+/// Rewrites a marker in place.
+///
+/// This re-serializes the whole struct, which is why the schema it round-trips
+/// through is [`crate::marker::DurableState`] — the same one the engine wrote.
 fn persist_marker(path: &Path, marker: &DurableState) -> Result<(), TransactionError> {
-    let bytes = serde_json::to_vec_pretty(marker)?;
-    secondbrain_vault::atomic_write::atomic_write(path, &bytes)?;
-    Ok(())
+    marker.persist(path)
 }

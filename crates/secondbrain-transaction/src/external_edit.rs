@@ -257,12 +257,32 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
                 NoteIdentity::Ambiguous(outcome) => return Ok(outcome),
             };
 
+        self.integrate_tracked(note_id, &path, &source, source_hash, &document)
+    }
+
+    /// Integrates changed bytes whose note identity is already resolved.
+    ///
+    /// Identity resolution is the caller's, and is deliberately not repeated
+    /// here: [`IdentityMap::resolve_identity`] answers a question about a path
+    /// and its content, and asking it twice about the same file can give two
+    /// different answers — a rename that also changed the bytes would be
+    /// re-resolved under its *new* path, where evidence belonging to some other
+    /// note can outweigh the note that just moved. The identity a caller has
+    /// already established is therefore carried in rather than re-derived.
+    fn integrate_tracked(
+        &self,
+        note_id: NoteId,
+        path: &WorkspacePath,
+        source: &str,
+        source_hash: ContentHash,
+        document: &SourceDocument,
+    ) -> Result<ExternalEditOutcome, ExternalEditError> {
         let Some(base) = self.bases.load(note_id)? else {
             // The note has an identity but no converged base — it was
             // registered before this pipeline saw it, or its record was lost.
             // Its current content is the only base we can honestly claim to
             // have agreed on, and the edit that brought us here is gone.
-            self.converge(note_id, &path, GENESIS_VERSION, &source)?;
+            self.converge(note_id, path, GENESIS_VERSION, source)?;
             return Ok(ExternalEditOutcome::BaseRecovered { note_id });
         };
         if base.source_hash == source_hash {
@@ -272,21 +292,21 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
             return Ok(ExternalEditOutcome::Unchanged { note_id });
         }
 
-        let operations = diff_documents(&SourceDocument::parse(&base.source)?, &document);
+        let operations = diff_documents(&SourceDocument::parse(&base.source)?, document);
         if let Some(reason) = review_reason(&operations) {
-            return self.require_review(Some(note_id), &path, source_hash, reason, Vec::new());
+            return self.require_review(Some(note_id), path, source_hash, reason, Vec::new());
         }
         if operations.is_empty() {
             // The bytes changed but nothing semantic did — a formatter touching
             // whitespace, for instance. Converge the base and journal nothing.
-            self.converge(note_id, &path, base.version, &source)?;
+            self.converge(note_id, path, base.version, source)?;
             return Ok(ExternalEditOutcome::Unchanged { note_id });
         }
 
-        let adoption = self.request(note_id, &path, source_hash, base.version, operations);
+        let adoption = self.request(note_id, path, source_hash, base.version, operations);
         let transaction_id = adoption.id;
         let adopted = self.engine.adopt_external(adoption, &base.source)?;
-        let outcome = match self.rebase_pending(note_id, &path, adopted.version)? {
+        let outcome = match self.rebase_pending(note_id, path, adopted.version)? {
             Some(merge) => ExternalEditOutcome::Merged {
                 note_id,
                 transaction_id: merge.transaction_id,
@@ -299,7 +319,7 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
                 version: adopted.version,
             },
         };
-        self.index.refresh(note_id, &path)?;
+        self.index.refresh(note_id, path)?;
         Ok(outcome)
     }
 
@@ -331,11 +351,13 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
                     // source under the new path would leave a base that does
                     // not describe the file its own record points at, and the
                     // change would stay unattributed until some later event
-                    // re-derived it. The identity has moved, so the content is
-                    // now integrated exactly as a `ContentChanged` at the new
-                    // path would be — including the missing-base case, which
-                    // reports itself rather than being absorbed here.
-                    _ => self.integrate_content(to),
+                    // re-derived it. The content is therefore integrated
+                    // exactly as a `ContentChanged` at the new path would be —
+                    // including the missing-base case, which reports itself
+                    // rather than being absorbed here — but with the identity
+                    // this arm already resolved, not a second lookup that could
+                    // answer differently now that the note has moved.
+                    _ => self.integrate_tracked(note_id, &to, &source, source_hash, &document),
                 }
             }
             NoteIdentity::Fresh(note_id) => self.register_base(note_id, &to, &source),

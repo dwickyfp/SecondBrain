@@ -10,11 +10,11 @@ use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::apply::apply_operations;
 use secondbrain_markdown::operation::SemanticOperation;
 use secondbrain_vault::WorkspaceRoot;
-use serde::Serialize;
 use thiserror::Error;
 
 use crate::base_snapshot::{BaseSnapshotStore, SnapshotError};
 use crate::failpoint;
+use crate::marker::DurableState;
 use crate::oplog::{LocalMutationLog, OplogError};
 use crate::paths;
 use crate::record::{FORMAT_VERSION_1, LocalOperationRecord, RecordEncodeError};
@@ -315,39 +315,19 @@ impl TransactionEngine {
         materialized_hash: ContentHash,
         index_repaired: bool,
     ) -> Result<(), TransactionError> {
-        #[derive(Serialize)]
-        struct DurableState<'a> {
-            transaction_id: TransactionId,
-            note_id: NoteId,
-            path: &'a WorkspacePath,
-            state: &'static str,
-            expected_hash: ContentHash,
-            /// Hash of the content this transaction's operations produce, so
-            /// recovery can recognize its own result on disk by comparison
-            /// rather than by re-applying operations that may not be
-            /// idempotent.
-            materialized_hash: ContentHash,
-            expected_version: NoteVersion,
-            committed_version: NoteVersion,
-            index_repaired: bool,
-        }
-        let bytes = serde_json::to_vec_pretty(&DurableState {
+        let marker = DurableState {
             transaction_id: request.id,
             note_id: request.note_id,
-            path: &request.path,
-            state: state.label(),
+            path: request.path.clone(),
+            state: state.label().to_owned(),
             expected_hash: request.expected_hash,
             materialized_hash,
             expected_version: request.expected_version,
             committed_version: version,
             index_repaired,
-        })?;
+        };
         let root = self.workspace.canonical_path();
         fs::create_dir_all(paths::transactions_dir(root))?;
-        secondbrain_vault::atomic_write::atomic_write(
-            &paths::marker_path(root, request.id),
-            &bytes,
-        )?;
-        Ok(())
+        marker.persist(&paths::marker_path(root, request.id))
     }
 }
