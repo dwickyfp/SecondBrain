@@ -522,6 +522,7 @@ dependencies = [
  "crc32fast",
  "secondbrain-core",
  "secondbrain-markdown",
+ "secondbrain-vault",
  "serde",
  "serde_json",
  "tempfile",
