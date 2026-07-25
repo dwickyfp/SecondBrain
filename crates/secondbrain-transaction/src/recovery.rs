@@ -29,6 +29,32 @@ pub enum RecoveryAction {
         note_id: NoteId,
         path: PathBuf,
     },
+    /// A durably journaled edit could not be replayed and was abandoned.
+    ///
+    /// The file on disk is preserved and the marker aborted, so the edit those
+    /// operations describe is lost. "Confirmed edits survive process and power
+    /// failure" is the invariant this layer exists for, so the loss is
+    /// reported rather than left to be inferred from a marker nobody reads.
+    /// The journal records themselves stay intact for whoever investigates.
+    Abandoned {
+        transaction_id: TransactionId,
+        note_id: NoteId,
+        path: WorkspacePath,
+        reason: AbandonedReason,
+    },
+}
+
+/// Why recovery could not replay a durably journaled edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbandonedReason {
+    /// The operations no longer anchor in the file: the text they name was
+    /// rewritten by an external editor or carried forward by another
+    /// transaction.
+    OperationsDoNotAnchor,
+    /// The operations still anchor, but the file is neither the state they
+    /// were derived from nor the state they produce, so replaying them would
+    /// overwrite content no marker accounts for.
+    UnrecognizedFileState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +64,13 @@ struct DurableState {
     path: WorkspacePath,
     state: String,
     expected_hash: ContentHash,
+    /// Hash of the content this transaction's operations produce, recorded
+    /// before the Markdown was written.
+    ///
+    /// Absent only on markers written before the engine recorded it, which are
+    /// recovered by the pre-state and idempotence rules alone.
+    #[serde(default)]
+    materialized_hash: Option<ContentHash>,
     expected_version: NoteVersion,
     committed_version: NoteVersion,
     #[serde(default)]
@@ -88,28 +121,57 @@ impl TransactionEngine {
 
             let note_path = self.workspace.resolve(&marker.path)?;
             let source = fs::read_to_string(&note_path)?;
-            let Ok(materialized) = apply_operations(&source, &operations) else {
-                // The journaled operations no longer describe an edit of the
-                // file on disk — their anchors are gone, because another
-                // transaction carried them forward or rewrote the same text.
-                // That is one transaction's problem: it is aborted, the file
-                // is preserved, and the remaining notes are still recovered.
-                marker.state = "ABORTED".to_owned();
-                persist_marker(&marker_path, &marker)?;
-                continue;
-            };
-            if ContentHash::digest(source.as_bytes()) == marker.expected_hash {
+            let source_hash = ContentHash::digest(source.as_bytes());
+            let materialized = if marker.materialized_hash == Some(source_hash) {
+                // The file is this transaction's own result, identified by the
+                // hash its marker recorded before the Markdown write. That is
+                // a positive test: re-applying the operations to decide the
+                // same thing only works for operations that happen to be
+                // idempotent, and a `ReplaceNode` anchors on the text it
+                // replaces, which its own post-state no longer contains.
+                source.clone()
+            } else if source_hash == marker.expected_hash {
+                // The file is the recorded pre-state: finish the write.
+                let Ok(materialized) = apply_operations(&source, &operations) else {
+                    actions.push(abandon(
+                        &mut marker,
+                        &marker_path,
+                        AbandonedReason::OperationsDoNotAnchor,
+                    )?);
+                    continue;
+                };
                 marker.state = "MATERIALIZING".to_owned();
                 persist_marker(&marker_path, &marker)?;
                 self.workspace
                     .atomic_write(&marker.path, materialized.as_bytes())?;
-            } else if materialized != source {
-                // The file is neither the recorded pre-state nor an idempotent
-                // post-state. Preserve it rather than overwriting newer data.
-                marker.state = "ABORTED".to_owned();
-                persist_marker(&marker_path, &marker)?;
-                continue;
-            }
+                materialized
+            } else {
+                // Neither state the marker names. The operations may still be
+                // idempotent against the file — a marker predating
+                // `materialized_hash` is recovered that way — but anything
+                // else is newer data, preserved rather than overwritten.
+                let Ok(materialized) = apply_operations(&source, &operations) else {
+                    // Their anchors are gone, because another transaction
+                    // carried them forward or rewrote the same text. That is
+                    // one transaction's problem: it is aborted, the file is
+                    // preserved, and the remaining notes are still recovered.
+                    actions.push(abandon(
+                        &mut marker,
+                        &marker_path,
+                        AbandonedReason::OperationsDoNotAnchor,
+                    )?);
+                    continue;
+                };
+                if materialized != source {
+                    actions.push(abandon(
+                        &mut marker,
+                        &marker_path,
+                        AbandonedReason::UnrecognizedFileState,
+                    )?);
+                    continue;
+                }
+                materialized
+            };
 
             marker.state = "COMMITTED".to_owned();
             marker.index_repaired = false;
@@ -189,6 +251,23 @@ fn index_repair(marker: &DurableState) -> RecoveryAction {
         note_id: marker.note_id,
         path: marker.path.clone(),
     }
+}
+
+/// Aborts a marker whose journaled operations recovery cannot replay, and
+/// reports the edit that was given up on.
+fn abandon(
+    marker: &mut DurableState,
+    marker_path: &Path,
+    reason: AbandonedReason,
+) -> Result<RecoveryAction, TransactionError> {
+    marker.state = "ABORTED".to_owned();
+    persist_marker(marker_path, marker)?;
+    Ok(RecoveryAction::Abandoned {
+        transaction_id: marker.transaction_id,
+        note_id: marker.note_id,
+        path: marker.path.clone(),
+        reason,
+    })
 }
 
 fn persist_marker(path: &Path, marker: &DurableState) -> Result<(), TransactionError> {

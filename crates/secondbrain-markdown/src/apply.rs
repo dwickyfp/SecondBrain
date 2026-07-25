@@ -474,9 +474,8 @@ const INCOMING_END_MARKER: &str = "__END_INCOMING__";
 #[must_use]
 pub fn review_reason_summary(reason: &str) -> &str {
     reason
-        .split(INCOMING_MARKER)
-        .next()
-        .unwrap_or(reason)
+        .split_once(INCOMING_MARKER)
+        .map_or(reason, |(summary, _)| summary)
         .trim_end()
 }
 

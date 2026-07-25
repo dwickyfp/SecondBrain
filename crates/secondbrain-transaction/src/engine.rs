@@ -118,35 +118,43 @@ impl TransactionEngine {
             .expected_version
             .checked_increment()
             .ok_or(TransactionError::VersionOverflow)?;
+        // Every marker this transaction writes names the content it
+        // materializes, so a crash anywhere after the Markdown write leaves
+        // recovery able to recognize the file as this transaction's own result
+        // by comparing hashes. Recovery must not have to deduce that by
+        // re-applying the operations: an operation that anchors on the text it
+        // replaces cannot be applied to its own post-state.
+        let materialized_hash = ContentHash::digest(materialized.as_bytes());
 
         let mut state = TransactionState::Prepared;
-        self.persist_state(&request, state, version, false)?;
+        self.persist_state(&request, state, version, materialized_hash, false)?;
 
         failpoint::hit("before_append")?;
         self.journal_operations(&request)?;
         failpoint::hit("after_append_before_state")?;
 
         state.transition_to(TransactionState::OperationsDurable)?;
-        self.persist_state(&request, state, version, false)?;
+        self.persist_state(&request, state, version, materialized_hash, false)?;
         failpoint::hit("after_operations_durable")?;
         state.transition_to(TransactionState::Materializing)?;
-        self.persist_state(&request, state, version, false)?;
+        self.persist_state(&request, state, version, materialized_hash, false)?;
         failpoint::hit("during_temp_markdown_write")?;
         self.workspace
             .atomic_write(&request.path, materialized.as_bytes())?;
         failpoint::hit("after_rename_before_commit")?;
         // The converged base is recorded *before* the transaction is marked
-        // committed. A crash in between then leaves a `MATERIALIZING` marker,
-        // which recovery re-materializes idempotently and whose base it
-        // records — whereas a crash after a `COMMITTED` marker but before the
-        // base would leave a committed version whose pre-state nothing holds,
-        // and the next external edit would diff against the stale base and
-        // journal this transaction's own operations a second time.
+        // committed. A crash in between then leaves a `MATERIALIZING` marker
+        // whose recorded materialized hash matches the file, which recovery
+        // commits and records the base for — whereas a crash after a
+        // `COMMITTED` marker but before the base would leave a committed
+        // version whose pre-state nothing holds, and the next external edit
+        // would diff against the stale base and journal this transaction's own
+        // operations a second time.
         self.record_converged_base(&request, version, &materialized)?;
         state.transition_to(TransactionState::Committed)?;
-        self.persist_state(&request, state, version, false)?;
+        self.persist_state(&request, state, version, materialized_hash, false)?;
         failpoint::hit("after_commit_before_index")?;
-        self.persist_state(&request, state, version, true)?;
+        self.persist_state(&request, state, version, materialized_hash, true)?;
 
         Ok(CommitOutcome {
             changed: true,
@@ -227,8 +235,22 @@ impl TransactionEngine {
         // the next event for this note correctly reports nothing to do.
         self.record_converged_base(&request, version, &source)?;
         failpoint::hit("during_adopt_convergence")?;
-        self.persist_state(&request, TransactionState::Committed, version, false)?;
-        self.persist_state(&request, TransactionState::Committed, version, true)?;
+        // The materialized content of an adoption is the file itself: the
+        // editor wrote it before the workspace ever saw the change.
+        self.persist_state(
+            &request,
+            TransactionState::Committed,
+            version,
+            actual_hash,
+            false,
+        )?;
+        self.persist_state(
+            &request,
+            TransactionState::Committed,
+            version,
+            actual_hash,
+            true,
+        )?;
 
         Ok(CommitOutcome {
             changed: false,
@@ -290,6 +312,7 @@ impl TransactionEngine {
         request: &TransactionRequest,
         state: TransactionState,
         version: NoteVersion,
+        materialized_hash: ContentHash,
         index_repaired: bool,
     ) -> Result<(), TransactionError> {
         #[derive(Serialize)]
@@ -299,6 +322,11 @@ impl TransactionEngine {
             path: &'a WorkspacePath,
             state: &'static str,
             expected_hash: ContentHash,
+            /// Hash of the content this transaction's operations produce, so
+            /// recovery can recognize its own result on disk by comparison
+            /// rather than by re-applying operations that may not be
+            /// idempotent.
+            materialized_hash: ContentHash,
             expected_version: NoteVersion,
             committed_version: NoteVersion,
             index_repaired: bool,
@@ -309,6 +337,7 @@ impl TransactionEngine {
             path: &request.path,
             state: state.label(),
             expected_hash: request.expected_hash,
+            materialized_hash,
             expected_version: request.expected_version,
             committed_version: version,
             index_repaired,

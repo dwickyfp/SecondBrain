@@ -319,13 +319,24 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
         match self.identify(from, &to, source_hash, document.semantic_fingerprint())? {
             NoteIdentity::Tracked(note_id) => {
                 self.identity.update_path(&note_id, &to)?;
-                // A move changes no bytes, so the converged base only follows
-                // the note to its new path.
-                if let Some(base) = self.bases.load(note_id)? {
-                    self.bases.save(note_id, &to, base.version, &base.source)?;
+                match self.bases.load(note_id)? {
+                    // A move on its own changes no bytes, so the converged
+                    // base only follows the note to its new path.
+                    Some(base) if base.source_hash == source_hash => {
+                        self.bases.save(note_id, &to, base.version, &base.source)?;
+                        self.index.refresh(note_id, &to)?;
+                        Ok(ExternalEditOutcome::Renamed { note_id, path: to })
+                    }
+                    // The move also changed the bytes. Re-filing the pre-move
+                    // source under the new path would leave a base that does
+                    // not describe the file its own record points at, and the
+                    // change would stay unattributed until some later event
+                    // re-derived it. The identity has moved, so the content is
+                    // now integrated exactly as a `ContentChanged` at the new
+                    // path would be — including the missing-base case, which
+                    // reports itself rather than being absorbed here.
+                    _ => self.integrate_content(to),
                 }
-                self.index.refresh(note_id, &to)?;
-                Ok(ExternalEditOutcome::Renamed { note_id, path: to })
             }
             NoteIdentity::Fresh(note_id) => self.register_base(note_id, &to, &source),
             NoteIdentity::Copy {

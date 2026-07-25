@@ -37,7 +37,11 @@ pub(crate) fn review_descriptor_path(
 
 /// Whether `path` names a transaction marker rather than another file sharing
 /// the directory, such as a review descriptor.
-pub(crate) fn is_marker(path: &Path) -> bool {
+///
+/// Public so that anything reading the directory — including tests — asks this
+/// rather than restating the convention and drifting from it.
+#[must_use]
+pub fn is_marker(path: &Path) -> bool {
     if path.extension().and_then(|value| value.to_str()) != Some("json") {
         return false;
     }

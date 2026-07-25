@@ -22,7 +22,9 @@ use secondbrain_transaction::external_edit::{
 };
 use secondbrain_transaction::oplog::LocalMutationLog;
 use secondbrain_transaction::record::LocalOperationRecord;
-use secondbrain_transaction::{TransactionEngine, TransactionError, TransactionRequest};
+use secondbrain_transaction::{
+    AbandonedReason, RecoveryAction, TransactionEngine, TransactionError, TransactionRequest,
+};
 use secondbrain_vault::event::WorkspaceEvent;
 use secondbrain_vault::watcher::{Normalizer, RawEvent, RawEventKind};
 use secondbrain_vault::{IdentityMap, WorkspaceRoot};
@@ -156,11 +158,9 @@ impl Workspace {
         let mut markers = Vec::new();
         for entry in fs::read_dir(&directory).expect("read transactions") {
             let path = entry.expect("entry").path();
-            let is_marker = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .is_some_and(|stem| stem.parse::<TransactionId>().is_ok());
-            if is_marker {
+            // The rule telling a marker from a review descriptor is production
+            // code's to state, not this harness's to restate.
+            if secondbrain_transaction::paths::is_marker(&path) {
                 markers.push(
                     serde_json::from_slice(&fs::read(&path).expect("read marker"))
                         .expect("parse marker"),
@@ -627,6 +627,68 @@ fn external_rename_keeps_the_note_id_and_updates_the_identity_map() {
     assert_eq!(index.refreshed().last().expect("refresh").1, renamed);
 }
 
+#[test]
+fn a_rename_that_also_changes_content_converges_the_base_with_the_file() {
+    let base = fixture("converged-base.md");
+    let external = fixture("external-paragraph-edit.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+
+    // An editor moved the note and saved a changed paragraph into it, which
+    // the watcher reports as one rename.
+    fs::create_dir_all(workspace.absolute("archive")).expect("create archive");
+    fs::remove_file(workspace.absolute(NOTE)).expect("remove the old path");
+    workspace.write("archive/meeting.md", &external);
+    let renamed = WorkspacePath::new("archive/meeting.md").expect("renamed path");
+
+    let outcome = coordinator
+        .integrate(WorkspaceEvent::Renamed {
+            from: note_path(),
+            to: renamed.clone(),
+        })
+        .expect("integrate rename");
+
+    // The identity follows the move, as it does for any rename.
+    let record = IdentityMap::open(&workspace.root)
+        .expect("identity map")
+        .lookup(&note_id)
+        .expect("lookup")
+        .expect("record");
+    assert_eq!(record.current_path, renamed);
+    // The bytes changed too, so the change is integrated rather than dropped:
+    // a converged base that still held the pre-move source would make the next
+    // edit re-derive this one and journal it twice.
+    assert!(
+        matches!(outcome, ExternalEditOutcome::Adopted { note_id: adopted, .. }
+            if adopted == note_id),
+        "{outcome:?}"
+    );
+    let recorded = workspace.base_record(note_id);
+    assert_eq!(recorded.source, external);
+    assert_eq!(recorded.path, renamed);
+    assert_eq!(
+        recorded.source_hash,
+        ContentHash::digest(external.as_bytes()),
+        "the base must describe the file its record points at"
+    );
+    let records = workspace.records(note_id);
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].actor_id, ActorId::new(EXTERNAL_ACTOR).unwrap());
+    assert_eq!(workspace.read("archive/meeting.md"), external);
+    // Pinning what is *not* fixed: the identity record's own hash still
+    // describes the content observed when the note was registered. Nothing in
+    // this pipeline refreshes it — `IdentityMap` exposes no API that does, and
+    // an ordinary content change leaves it equally stale — so this records
+    // today's behaviour rather than endorsing it.
+    assert_eq!(
+        record.source_hash,
+        ContentHash::digest(base.as_bytes()),
+        "identity hashes are refreshed only at registration"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Case 6: an external copy gets a new ID
 // ---------------------------------------------------------------------------
@@ -964,6 +1026,70 @@ fn a_crash_between_the_commit_marker_and_the_converged_base_cannot_replay_the_ed
 }
 
 #[test]
+fn a_crash_before_the_commit_marker_converges_a_replacing_transaction() {
+    let base = fixture("converged-base.md");
+    let internal = fixture("internal-rollout-edit.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+
+    // The internal edit replaces a paragraph, so its operations anchor on the
+    // text they replace and cannot be applied to their own result. Recovery
+    // must therefore not infer "the file is this transaction's post-state" by
+    // re-applying the operations to it — the only transactions that survive
+    // that inference are the accidentally idempotent ones.
+    let internal_id = commit_internal_crashing_at(
+        &workspace,
+        note_id,
+        NOTE,
+        &base,
+        &internal,
+        "after_rename_before_commit",
+    );
+    let journaled = workspace.records(note_id);
+    assert_eq!(journaled.len(), 1, "{journaled:?}");
+    assert_eq!(journaled[0].operation.kind_name(), "ReplaceNode");
+    assert_eq!(workspace.marker(internal_id)["state"], "MATERIALIZING");
+    assert_eq!(workspace.read(NOTE), internal, "the Markdown was written");
+    assert_eq!(
+        workspace.base(note_id),
+        base,
+        "the crash was before the base"
+    );
+
+    workspace.engine().recover().expect("recover");
+
+    // The file is exactly what this transaction materialized, so recovery
+    // converges it: committed, and the base updated to the state both sides
+    // now agree on.
+    assert_eq!(workspace.marker(internal_id)["state"], "COMMITTED");
+    assert_eq!(workspace.read(NOTE), internal);
+    let recorded = workspace.base_record(note_id);
+    assert_eq!(recorded.source, internal);
+    assert_eq!(recorded.version, NoteVersion::new(1));
+
+    // The consequence that makes this matter: the next external event for the
+    // note has nothing to derive, instead of diffing a stale base and
+    // journaling alice's edit a second time as the laptop's.
+    let outcome = coordinator
+        .integrate(changed(NOTE, &internal))
+        .expect("integrate");
+
+    assert_eq!(outcome, ExternalEditOutcome::Unchanged { note_id });
+    let records = workspace.records(note_id);
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].transaction_id, internal_id);
+    assert_eq!(records[0].actor_id, ActorId::new("alice").unwrap());
+    assert!(
+        !records
+            .iter()
+            .any(|record| record.actor_id == ActorId::new(EXTERNAL_ACTOR).unwrap()),
+        "an edit alice made must not become an edit the laptop made: {records:?}"
+    );
+}
+
+#[test]
 fn a_crash_inside_an_adoption_leaves_the_converged_base_agreeing_with_the_file() {
     let base = fixture("converged-base.md");
     let external = fixture("external-paragraph-edit.md");
@@ -1005,7 +1131,10 @@ fn a_crash_inside_an_adoption_leaves_the_converged_base_agreeing_with_the_file()
         .into_iter()
         .filter(|marker| marker["state"] == "COMMITTED")
         .collect();
-    assert!(committed.len() <= 1, "{committed:?}");
+    assert!(
+        committed.is_empty(),
+        "the adoption never reached its commit marker: {committed:?}"
+    );
 }
 
 #[test]
@@ -1109,6 +1238,89 @@ fn one_unreplayable_transaction_does_not_abandon_recovery_for_every_other_note()
         workspace.read(OTHER),
         other_internal,
         "the unrelated note is recovered"
+    );
+}
+
+#[test]
+fn an_edit_whose_operations_no_longer_anchor_is_reported_rather_than_dropped_silently() {
+    let base = fixture("converged-base.md");
+    // Both the internal transaction and the external editor changed the
+    // migration paragraph, so the journaled operations have no anchor left.
+    let internal = fixture("internal-migration-edit.md");
+    let external = fixture("external-paragraph-edit.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+    let internal_id = journal_internal_without_materializing(&workspace, note_id, &base, &internal);
+    workspace.write(NOTE, &external);
+    coordinator
+        .integrate(changed(NOTE, &external))
+        .expect("integrate external edit");
+    assert_eq!(workspace.marker(internal_id)["state"], "OPERATIONS_DURABLE");
+
+    let actions = workspace.engine().recover().expect("recover");
+
+    assert_eq!(workspace.marker(internal_id)["state"], "ABORTED");
+    assert_eq!(workspace.read(NOTE), external, "the file is preserved");
+    // The oplog append is the promise that a confirmed edit survives a crash.
+    // Recovery cannot keep that promise here, and must say so rather than
+    // return success over a dropped edit.
+    assert!(
+        actions.iter().any(|action| matches!(
+            action,
+            RecoveryAction::Abandoned {
+                transaction_id,
+                note_id: abandoned,
+                path,
+                reason,
+            } if *transaction_id == internal_id
+                && *abandoned == note_id
+                && *path == note_path()
+                && *reason == AbandonedReason::OperationsDoNotAnchor
+        )),
+        "a durably journaled edit was abandoned without a word: {actions:?}"
+    );
+}
+
+#[test]
+fn an_edit_recovery_cannot_place_is_reported_rather_than_dropped_silently() {
+    let base = fixture("converged-base.md");
+    let internal = fixture("internal-rollout-edit.md");
+    let external = fixture("external-paragraph-edit.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+    let internal_id = journal_internal_without_materializing(&workspace, note_id, &base, &internal);
+
+    // An external editor saved over the file while the workspace was down, so
+    // by the time recovery runs the file is neither the state the operations
+    // were derived from nor the state they produce — though they still anchor.
+    workspace.write(NOTE, &external);
+
+    let actions = workspace.engine().recover().expect("recover");
+
+    assert_eq!(workspace.marker(internal_id)["state"], "ABORTED");
+    assert_eq!(
+        workspace.read(NOTE),
+        external,
+        "newer data is preserved, not overwritten"
+    );
+    assert!(
+        actions.iter().any(|action| matches!(
+            action,
+            RecoveryAction::Abandoned {
+                transaction_id,
+                note_id: abandoned,
+                path,
+                reason,
+            } if *transaction_id == internal_id
+                && *abandoned == note_id
+                && *path == note_path()
+                && *reason == AbandonedReason::UnrecognizedFileState
+        )),
+        "a durably journaled edit was abandoned without a word: {actions:?}"
     );
 }
 

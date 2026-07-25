@@ -11,7 +11,7 @@ pub mod engine;
 pub mod external_edit;
 pub mod failpoint;
 pub mod oplog;
-mod paths;
+pub mod paths;
 pub mod record;
 pub mod recovery;
 pub mod state;
@@ -21,7 +21,7 @@ pub use engine::{CommitOutcome, TransactionEngine, TransactionError, Transaction
 pub use external_edit::{
     ExternalEditCoordinator, ExternalEditError, ExternalEditOutcome, IndexRefresh,
 };
-pub use recovery::RecoveryAction;
+pub use recovery::{AbandonedReason, RecoveryAction};
 pub use state::{StateTransitionError, TransactionState};
 
 pub use record::{
