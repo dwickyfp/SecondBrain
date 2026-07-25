@@ -112,6 +112,7 @@ pub fn rebuild(root: impl AsRef<Path>, config: &IndexConfig) -> Result<IndexRepo
     let mut files = Vec::new();
     scan(root, root, config, &mut files, &mut skipped)?;
     files.sort();
+    reject_path_collisions(&files)?;
 
     let mut notes = Vec::new();
     let mut ids = BTreeMap::new();
