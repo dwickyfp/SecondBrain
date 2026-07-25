@@ -7,6 +7,7 @@
 //! for zero-copy slicing.
 
 pub mod ast;
+pub mod extract;
 pub mod frontmatter;
 pub mod parse;
 pub mod source;

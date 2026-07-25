@@ -10,3 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 markdown.workspace = true
+secondbrain-core = { path = "../secondbrain-core" }
+serde.workspace = true
+serde_yaml.workspace = true
