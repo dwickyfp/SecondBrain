@@ -263,6 +263,7 @@ fn help_lists_every_command_without_ansi() {
         "diff",
         "transaction",
         "recovery",
+        "reconcile",
         "doctor",
     ] {
         assert!(help.contains(command), "help omits `{command}`: {help}");
@@ -1122,6 +1123,284 @@ fn doctor_reports_a_workspace_that_was_never_initialized() {
 }
 
 // ---------------------------------------------------------------------------
+// reconcile
+// ---------------------------------------------------------------------------
+
+/// Applies `contents` to `ALPHA` through the diff/apply pair.
+///
+/// That pair is what records a converged base, which is the state a later
+/// external edit is measured against — so this is how a test puts a note into
+/// the condition `reconcile` exists to resolve.
+fn converge_alpha(vault: &Vault, contents: &str) {
+    let plan = plan_for(vault, contents);
+    secondbrain()
+        .args([
+            "transaction",
+            "apply",
+            vault.arg(),
+            plan.to_str().expect("UTF-8"),
+        ])
+        .assert()
+        .success();
+}
+
+/// The per-note entry `reconcile` reported for one workspace path.
+fn reconciled<'a>(report: &'a Value, path: &str) -> &'a Value {
+    report["notes"]
+        .as_array()
+        .expect("reconcile reports one entry per tracked note")
+        .iter()
+        .find(|note| note["path"] == path)
+        .unwrap_or_else(|| panic!("no entry for {path}: {report}"))
+}
+
+#[test]
+fn reconcile_journals_an_external_edit_and_makes_the_note_diffable_again() {
+    let vault = Vault::indexed();
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
+    );
+
+    // An editor outside the workspace saves over the note. Nothing has
+    // journaled that edit, so the converged base still describes the state
+    // before it and `diff` refuses to plan across the gap.
+    let external = "# Alpha\n\nAlpha links to [[beta]] after the retro.\n";
+    vault.write(ALPHA, external);
+    let incoming = vault.scratch("later.md");
+    fs::write(
+        &incoming,
+        "# Alpha\n\nAlpha links to [[beta]] after the retro, on Tuesday.\n",
+    )
+    .expect("write incoming file");
+    secondbrain()
+        .args([
+            "diff",
+            vault.arg(),
+            ALPHA,
+            incoming.to_str().expect("UTF-8"),
+        ])
+        .assert()
+        .code(REVIEW_REQUIRED);
+
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    let alpha = reconciled(&report, ALPHA);
+    assert_eq!(alpha["outcome"], "adopted", "{report}");
+    assert_eq!(alpha["version"], 2, "{report}");
+    assert!(
+        alpha["transaction_id"].as_str().is_some(),
+        "an adopted edit is a transaction an operator can look up: {report}"
+    );
+    assert_eq!(report["adopted"], 1, "{report}");
+    assert_eq!(report["index_refreshed"], true, "{report}");
+    assert_eq!(
+        vault.read(ALPHA),
+        external,
+        "reconcile journals what the editor wrote; it never rewrites the file"
+    );
+
+    // The edit is attributed and journaled, so the note can be planned against
+    // again — which is the remedy this command exists to provide.
+    let (code, plan) = run_json(&[
+        "diff",
+        vault.arg(),
+        ALPHA,
+        incoming.to_str().expect("UTF-8"),
+    ]);
+    assert_eq!(code, OK, "{plan}");
+    assert_eq!(plan["expected_version"], 2, "{plan}");
+
+    // And the derived index describes what is on disk now.
+    let (code, hits) = run_json(&["search", vault.arg(), "retro"]);
+    assert_eq!(code, OK, "{hits}");
+    assert_eq!(hits["hits"].as_array().expect("hits").len(), 1, "{hits}");
+}
+
+#[test]
+fn reconcile_leaves_a_converged_note_exactly_as_it_is() {
+    let vault = Vault::indexed();
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
+    );
+    let before = vault.read(ALPHA);
+
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(
+        reconciled(&report, ALPHA)["outcome"],
+        "unchanged",
+        "{report}"
+    );
+    assert_eq!(report["adopted"], 0, "{report}");
+    assert_eq!(
+        report["index_refreshed"], false,
+        "a pass that changed nothing must not claim to have rebuilt anything: {report}"
+    );
+    assert_eq!(
+        vault.read(ALPHA),
+        before,
+        "an unchanged note is never normalized or rewritten"
+    );
+
+    let (code, doctor) = run_json(&["doctor", vault.arg()]);
+    assert_eq!(code, OK, "{doctor}");
+    assert_eq!(
+        doctor["transactions"]["total"], 1,
+        "reconciling an unchanged note must journal nothing: {doctor}"
+    );
+}
+
+#[test]
+fn reconcile_merges_an_edit_the_external_write_would_have_clobbered() {
+    let vault = Vault::indexed();
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the rollout.\n\nSecond paragraph.\n",
+    );
+    // A workspace transaction journaled a change to the first paragraph and
+    // died before it could write it.
+    interrupted_edit(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n\nSecond paragraph.\n",
+        "after_operations_durable",
+    );
+    // The external editor then saved its own change to the second paragraph
+    // over the same file, clobbering the journaled one.
+    vault.write(
+        ALPHA,
+        "# Alpha\n\nAlpha links to [[beta]] for the rollout.\n\nSecond paragraph, revised.\n",
+    );
+
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(reconciled(&report, ALPHA)["outcome"], "merged", "{report}");
+    assert_eq!(report["merged"], 1, "{report}");
+    assert_eq!(
+        vault.read(ALPHA),
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n\nSecond paragraph, revised.\n",
+        "both changes must survive the reconciliation"
+    );
+
+    let (code, recovery) = run_json(&["recovery", "check", vault.arg()]);
+    assert_eq!(code, OK, "{recovery}");
+    assert!(
+        recovery["actions"].as_array().expect("actions").is_empty(),
+        "a merged edit leaves recovery nothing to replay over the merged file: {recovery}"
+    );
+}
+
+#[test]
+fn reconcile_reports_a_deleted_note_and_stops_the_index_describing_it() {
+    let vault = Vault::indexed();
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
+    );
+    let converged = vault.read(ALPHA);
+    fs::remove_file(vault.path().join(ALPHA)).expect("an external editor deletes the note");
+
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    let alpha = reconciled(&report, ALPHA);
+    assert_eq!(alpha["outcome"], "deleted", "{report}");
+    assert!(
+        alpha["note_id"].as_str().is_some(),
+        "an operator must be told which note the vanished file was: {report}"
+    );
+    assert_eq!(report["deleted"], 1, "{report}");
+
+    let (code, hits) = run_json(&["search", vault.arg(), "launch"]);
+    assert_eq!(code, OK, "{hits}");
+    assert!(
+        hits["hits"].as_array().expect("hits").is_empty(),
+        "a note whose file is gone must stop being findable: {hits}"
+    );
+
+    // Identity and converged base are kept, so a file that comes back is
+    // recognized as the same note rather than observed for the first time.
+    vault.write(ALPHA, &converged);
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(
+        reconciled(&report, ALPHA)["outcome"],
+        "unchanged",
+        "the converged base must survive the deletion: {report}"
+    );
+}
+
+#[test]
+fn reconcile_of_an_ambiguous_edit_files_it_for_review_rather_than_guessing() {
+    let vault = Vault::indexed();
+    // Converged in two steps, because the base has to end up holding two
+    // identical paragraphs: that is the state in which a change to one of them
+    // cannot be attributed to either without a person saying which.
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the rollout.\n\nRepeated.\n",
+    );
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the rollout.\n\nRepeated.\n\nRepeated.\n",
+    );
+    let external = "# Alpha\n\nAlpha links to [[beta]] for the rollout.\n\nRepeated.\n\nChanged.\n";
+    vault.write(ALPHA, external);
+
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(
+        code, REVIEW_REQUIRED,
+        "an operator must be able to tell `needs a human` from `broke`: {report}"
+    );
+    let alpha = reconciled(&report, ALPHA);
+    assert_eq!(alpha["outcome"], "review_required", "{report}");
+    let descriptor = alpha["descriptor_path"]
+        .as_str()
+        .expect("the review is a real artifact a person can open");
+    assert!(Path::new(descriptor).exists(), "{report}");
+    assert_eq!(report["reviews_required"], 1, "{report}");
+    assert_eq!(
+        vault.read(ALPHA),
+        external,
+        "a change awaiting review is left exactly as the editor wrote it"
+    );
+
+    let (code, doctor) = run_json(&["doctor", vault.arg()]);
+    assert_eq!(code, DIAGNOSTICS, "{doctor}");
+    assert_eq!(doctor["reviews_pending"], 1, "{doctor}");
+}
+
+#[test]
+fn reconcile_of_a_workspace_that_converged_nothing_claims_no_work() {
+    let vault = Vault::indexed();
+
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(report["considered"], 0, "{report}");
+    assert!(
+        report["notes"].as_array().expect("notes").is_empty(),
+        "{report}"
+    );
+    assert_eq!(report["index_refreshed"], false, "{report}");
+}
+
+#[test]
+fn reconcile_of_an_uninitialized_directory_fails() {
+    let vault = Vault::empty();
+
+    secondbrain()
+        .args(["reconcile", vault.arg()])
+        .assert()
+        .code(FAILED);
+}
+
+// ---------------------------------------------------------------------------
 // Output contract
 // ---------------------------------------------------------------------------
 
@@ -1135,6 +1414,7 @@ fn human_output_carries_no_ansi_when_stdout_is_not_a_tty() {
         vec!["search", vault.arg(), "migration"],
         vec!["note", "inspect", vault.arg(), ALPHA],
         vec!["recovery", "check", vault.arg()],
+        vec!["reconcile", vault.arg()],
         vec!["doctor", vault.arg()],
     ] {
         let assertion = secondbrain().args(&arguments).assert().success();

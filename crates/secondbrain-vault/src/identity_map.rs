@@ -233,6 +233,29 @@ impl IdentityMap {
         Ok(self.records.iter().find(|r| &r.note_id == id).cloned())
     }
 
+    /// The note currently living at `path`, when exactly one record claims it.
+    ///
+    /// [`Self::resolve_identity`] answers a question about a file's *content*
+    /// and cannot be asked about a path whose file is gone. A deletion is
+    /// exactly that case, so it is answered here instead — from the record's
+    /// `current_path` only. Historical paths are deliberately not consulted: a
+    /// path a note has moved away from disappearing is that move completing,
+    /// not the note going with it.
+    ///
+    /// Returns `None` when no record claims the path, and also when more than
+    /// one does. A file vanishing is not the occasion to resolve an ambiguity
+    /// between two records — there is no content left to resolve it with, and
+    /// naming one of them would be a guess.
+    #[must_use]
+    pub fn note_at(&self, path: &WorkspacePath) -> Option<NoteId> {
+        let mut claiming = self
+            .records
+            .iter()
+            .filter(|record| &record.current_path == path);
+        let first = claiming.next()?;
+        claiming.next().is_none().then_some(first.note_id)
+    }
+
     /// Resolves the stable identity for a file at `path` with the given hash
     /// and fingerprint.
     ///

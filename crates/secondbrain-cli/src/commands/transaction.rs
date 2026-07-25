@@ -13,20 +13,11 @@ use secondbrain_core::id::{NoteId, NoteVersion, TransactionId};
 use secondbrain_transaction::TransactionEngine;
 use serde::Serialize;
 
+use crate::commands::{CLI_ACTOR, CLI_DEVICE};
 use crate::exit::{CliError, OK, read_file};
 use crate::output::{Format, Report, emit};
 use crate::plan::TransactionPlan;
 use crate::workspace::Workspace;
-
-/// The actor a locally applied plan is attributed to.
-///
-/// Phase 0 has no identity management, so the CLI names itself rather than
-/// claiming to be a person it cannot authenticate. Attribution becomes real in
-/// the phase that introduces actor identity and scopes.
-const CLI_ACTOR: &str = "cli";
-
-/// The device a locally applied plan is attributed to.
-const CLI_DEVICE: &str = "local";
 
 /// What applying a plan did.
 #[derive(Serialize)]

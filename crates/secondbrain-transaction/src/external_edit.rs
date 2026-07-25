@@ -38,6 +38,7 @@ use secondbrain_markdown::operation::SemanticOperation;
 use secondbrain_markdown::parse::ParseError;
 use secondbrain_markdown::{Fingerprint, SourceDocument};
 use secondbrain_vault::event::WorkspaceEvent;
+use secondbrain_vault::watcher::WorkspaceWatcher;
 use secondbrain_vault::{IdentityMap, RecoveryOutcome, WorkspaceRoot};
 use serde::Serialize;
 use thiserror::Error;
@@ -70,6 +71,81 @@ pub trait IndexRefresh {
     /// rebuild can always recreate the index.
     fn refresh(&self, note_id: NoteId, path: &WorkspacePath)
     -> Result<(), secondbrain_core::Error>;
+}
+
+/// Announces a write the workspace performed itself.
+///
+/// A watcher cannot tell a file this workspace just wrote from one an external
+/// editor wrote — both arrive as the same filesystem event. Unannounced, the
+/// coordinator's own materialization comes back as an external edit, is
+/// journaled, materialized, and observed again: a write loop, with a
+/// transaction per lap in the durable journal.
+///
+/// The vault owns the suppression itself
+/// ([`secondbrain_vault::watcher::WorkspaceWatcher::record_internal_write`]);
+/// this trait is how the coordinator reaches whatever watcher is running,
+/// including none.
+pub trait InternalWriteReceipts {
+    /// Records that this workspace is about to leave `hash` at `path`.
+    ///
+    /// Called *before* the bytes are written. A receipt that arrived after the
+    /// event it was meant to suppress would be too late, and the watcher
+    /// consumes one receipt per matching event, so announcing a write that
+    /// then does not happen leaves a receipt that would swallow a real save.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the receipt could not be delivered. The caller must
+    /// treat that as a reason not to write: an unannounced write is a loop.
+    fn record_internal_write(
+        &self,
+        path: &WorkspacePath,
+        hash: ContentHash,
+    ) -> Result<(), secondbrain_core::Error>;
+}
+
+impl<T: InternalWriteReceipts + ?Sized> InternalWriteReceipts for &T {
+    fn record_internal_write(
+        &self,
+        path: &WorkspacePath,
+        hash: ContentHash,
+    ) -> Result<(), secondbrain_core::Error> {
+        (**self).record_internal_write(path, hash)
+    }
+}
+
+/// The sink for a process that runs no watcher.
+///
+/// A one-shot process observes nothing, so it has nothing to announce to, and
+/// saying so explicitly is better than a coordinator that silently might or
+/// might not be announcing. This is what [`ExternalEditCoordinator::new`]
+/// starts with; [`ExternalEditCoordinator::announcing_to`] replaces it.
+pub struct NoWatcher;
+
+impl InternalWriteReceipts for NoWatcher {
+    fn record_internal_write(
+        &self,
+        _path: &WorkspacePath,
+        _hash: ContentHash,
+    ) -> Result<(), secondbrain_core::Error> {
+        Ok(())
+    }
+}
+
+/// The production sink: the watcher that would otherwise re-observe the write.
+impl InternalWriteReceipts for WorkspaceWatcher {
+    fn record_internal_write(
+        &self,
+        path: &WorkspacePath,
+        hash: ContentHash,
+    ) -> Result<(), secondbrain_core::Error> {
+        Self::record_internal_write(self, path.clone(), hash).map_err(|source| {
+            secondbrain_core::Error::Io {
+                operation: "announce an internal write to the watcher",
+                source: io::Error::other(source),
+            }
+        })
+    }
 }
 
 /// What integrating one external change did.
@@ -146,11 +222,14 @@ pub enum ExternalEditOutcome {
         source_note_id: NoteId,
     },
     /// A file was removed. Phase 0 has no delete transaction, so the deletion
-    /// is reported rather than acted on; identity and converged base are kept
-    /// so the note is recovered if the file comes back.
+    /// is not journaled; identity and converged base are kept so the note is
+    /// recovered if the file comes back. The derived index is refreshed, so
+    /// nothing keeps describing a file that is not there.
     Deleted {
         /// The path that disappeared.
         path: WorkspacePath,
+        /// The note that lived there, when the identity map names exactly one.
+        note_id: Option<NoteId>,
     },
 }
 
@@ -176,7 +255,7 @@ pub enum ExternalEditError {
 }
 
 /// Integrates external filesystem changes into one workspace.
-pub struct ExternalEditCoordinator<R: IndexRefresh> {
+pub struct ExternalEditCoordinator<R: IndexRefresh, W: InternalWriteReceipts = NoWatcher> {
     workspace: WorkspaceRoot,
     engine: TransactionEngine,
     identity: IdentityMap,
@@ -184,10 +263,16 @@ pub struct ExternalEditCoordinator<R: IndexRefresh> {
     actor: ActorId,
     device: DeviceId,
     index: R,
+    receipts: W,
 }
 
-impl<R: IndexRefresh> ExternalEditCoordinator<R> {
+impl<R: IndexRefresh> ExternalEditCoordinator<R, NoWatcher> {
     /// Opens a coordinator that attributes every edit it sees to `device`.
+    ///
+    /// The coordinator announces its own writes to nothing until
+    /// [`Self::announcing_to`] gives it a watcher. That is the right default
+    /// for a one-shot process, and the wrong one for a running watcher — which
+    /// is why the choice is made rather than assumed.
     ///
     /// # Errors
     ///
@@ -208,7 +293,32 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
             actor,
             device,
             index,
+            receipts: NoWatcher,
         })
+    }
+}
+
+impl<R: IndexRefresh, W: InternalWriteReceipts> ExternalEditCoordinator<R, W> {
+    /// Announces every write this coordinator causes to `receipts`.
+    ///
+    /// Wire this to the running [`WorkspaceWatcher`] wherever one exists. The
+    /// merge path is the only path that writes a note, and an unannounced
+    /// merge is a write loop — see [`InternalWriteReceipts`].
+    #[must_use]
+    pub fn announcing_to<V: InternalWriteReceipts>(
+        self,
+        receipts: V,
+    ) -> ExternalEditCoordinator<R, V> {
+        ExternalEditCoordinator {
+            workspace: self.workspace,
+            engine: self.engine,
+            identity: self.identity,
+            bases: self.bases,
+            actor: self.actor,
+            device: self.device,
+            index: self.index,
+            receipts,
+        }
     }
 
     /// Integrates one normalized workspace event.
@@ -225,8 +335,40 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
         match event {
             WorkspaceEvent::ContentChanged { path, .. } => self.integrate_content(path),
             WorkspaceEvent::Renamed { from, to } => self.integrate_rename(&from, to),
-            WorkspaceEvent::Deleted { path } => Ok(ExternalEditOutcome::Deleted { path }),
+            WorkspaceEvent::Deleted { path } => self.integrate_deletion(path),
         }
+    }
+
+    /// Integrates the disappearance of a file.
+    ///
+    /// Phase 0 has no delete transaction, so there is nothing to journal and
+    /// nothing to attribute — but there *is* derived state that now describes a
+    /// file which no longer exists, and leaving it in place would let a search
+    /// return a note an operator cannot open. The refresh is therefore the
+    /// whole of the deletion path.
+    ///
+    /// The identity record and the converged base are deliberately kept. They
+    /// are what recognizes the file as the same note if it comes back — from a
+    /// restored backup, an undo, or a sync — and discarding them would turn a
+    /// recoverable deletion into a permanent loss of the note's history to buy
+    /// nothing.
+    fn integrate_deletion(
+        &self,
+        path: WorkspacePath,
+    ) -> Result<ExternalEditOutcome, ExternalEditError> {
+        let Some(note_id) = self.identity.note_at(&path) else {
+            // Nothing tracked lived here, so no note's derived state can be
+            // stale and there is no note to name in the refresh.
+            return Ok(ExternalEditOutcome::Deleted {
+                path,
+                note_id: None,
+            });
+        };
+        self.index.refresh(note_id, &path)?;
+        Ok(ExternalEditOutcome::Deleted {
+            path,
+            note_id: Some(note_id),
+        })
     }
 
     /// Integrates changed bytes at `path`.
@@ -468,6 +610,15 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
             // with: the change is the workspace's own, not the editor's.
             (request.actor, request.device) = attribution;
             let rebase_id = request.id;
+            let rebased_hash = ContentHash::digest(rebased.as_bytes());
+            // The receipt goes out before the bytes do. This commit is the only
+            // write the coordinator performs, and to a watcher it is
+            // indistinguishable from an external editor's save; announcing it
+            // afterwards would race the event it exists to suppress. If the
+            // announcement fails, nothing is written and the pending
+            // transaction is left for recovery — an unannounced write would be
+            // a loop, which is worse than an unfinished merge.
+            self.receipts.record_internal_write(path, rebased_hash)?;
             let outcome = self.engine.commit(request)?;
             failpoint::hit("after_rebase_before_supersede")?;
             // The rebase is durable before the transaction it carries forward
@@ -484,7 +635,7 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
             merge = Some(Merge {
                 transaction_id: rebase_id,
                 version,
-                source_hash: ContentHash::digest(rebased.as_bytes()),
+                source_hash: rebased_hash,
             });
         }
         Ok(merge)

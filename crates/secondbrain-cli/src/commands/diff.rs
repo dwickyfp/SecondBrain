@@ -68,9 +68,11 @@ pub fn run(
     let workspace = Workspace::open(workspace)?;
     let note_path = WorkspacePath::new(path)?;
     let database = workspace.open_index()?;
-    let summary = database
-        .note_by_path(note_path.as_str())?
-        .ok_or_else(|| CliError::NoteNotIndexed(path.to_owned()))?;
+    let summary = database.note_by_path(note_path.as_str())?.ok_or_else(|| {
+        CliError::Core(secondbrain_core::Error::NoteNotIndexed {
+            path: note_path.as_path().to_path_buf(),
+        })
+    })?;
 
     // The base is the note as it is on disk, which is exactly the precondition
     // the transaction engine checks when the plan is applied. Diffing against
@@ -90,10 +92,10 @@ pub fn run(
     let snapshot = BaseSnapshotStore::new(workspace.root()).load(summary.note_id)?;
     let expected_version = match &snapshot {
         Some(snapshot) if !snapshot.describes(base_hash) => {
-            return Err(CliError::NoteDiverged {
-                path: note_path.to_string(),
-                version: snapshot.version.get(),
-            });
+            return Err(CliError::Core(secondbrain_core::Error::NoteDiverged {
+                path: note_path.as_path().to_path_buf(),
+                version: snapshot.version,
+            }));
         }
         Some(snapshot) => snapshot.version,
         // No base was ever recorded, so no transaction has ever touched this

@@ -74,6 +74,19 @@ fn sample_errors() -> Vec<(Error, &'static str)> {
             "SB-NOTE-DUPLICATE-ID",
         ),
         (
+            Error::NoteDiverged {
+                path: PathBuf::from("notes/meeting.md"),
+                version: secondbrain_core::id::NoteVersion::new(4),
+            },
+            "SB-NOTE-DIVERGED",
+        ),
+        (
+            Error::NoteNotIndexed {
+                path: PathBuf::from("notes/meeting.md"),
+            },
+            "SB-NOTE-NOT-INDEXED",
+        ),
+        (
             Error::StalePrecondition {
                 resource: "note:01ARZ3NDEKTSV4RRFFQ69G5FAV".into(),
                 expected: "4".into(),
@@ -203,4 +216,37 @@ fn displays_are_concise_and_use_only_structured_diagnostic_fields() {
         assert!(!display.contains("SELECT secret_key"));
         assert!(!display.contains("signature bytes"));
     }
+}
+
+#[test]
+fn the_conditions_every_surface_can_meet_are_named_once_here() {
+    // A note whose file no longer holds its converged base, and a note absent
+    // from the derived index, are facts about the domain rather than about any
+    // one surface. Each surface that meets them — the CLI today, the MCP server
+    // and the local API later — must report the same code, which is only
+    // possible if the taxonomy defines it. Left to the surfaces, the second one
+    // to meet the condition mints a second code for it.
+    let diverged = Error::NoteDiverged {
+        path: PathBuf::from("notes/meeting.md"),
+        version: secondbrain_core::id::NoteVersion::new(4),
+    };
+    let not_indexed = Error::NoteNotIndexed {
+        path: PathBuf::from("notes/meeting.md"),
+    };
+
+    assert_eq!(diverged.code(), "SB-NOTE-DIVERGED");
+    assert_eq!(not_indexed.code(), "SB-NOTE-NOT-INDEXED");
+    assert_ne!(
+        not_indexed.code(),
+        Error::Sqlite {
+            operation: "open index",
+            source: Box::new(FakeSqliteError("no such table")),
+        }
+        .code(),
+        "a note missing from an index that exists is not the index failing"
+    );
+    assert!(
+        diverged.to_string().contains("notes/meeting.md") && diverged.to_string().contains('4'),
+        "the message must say which note and which base version: {diverged}"
+    );
 }

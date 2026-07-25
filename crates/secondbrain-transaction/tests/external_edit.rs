@@ -19,6 +19,7 @@ use secondbrain_markdown::diff::diff_documents;
 use secondbrain_transaction::base_snapshot::{BaseSnapshot, BaseSnapshotStore};
 use secondbrain_transaction::external_edit::{
     ExternalEditCoordinator, ExternalEditError, ExternalEditOutcome, IndexRefresh,
+    InternalWriteReceipts,
 };
 use secondbrain_transaction::oplog::LocalMutationLog;
 use secondbrain_transaction::record::LocalOperationRecord;
@@ -26,7 +27,7 @@ use secondbrain_transaction::{
     AbandonedReason, RecoveryAction, TransactionEngine, TransactionError, TransactionRequest,
 };
 use secondbrain_vault::event::WorkspaceEvent;
-use secondbrain_vault::watcher::{Normalizer, RawEvent, RawEventKind};
+use secondbrain_vault::watcher::{Normalizer, RawEvent, RawEventKind, WorkspaceWatcher};
 use secondbrain_vault::{IdentityMap, WorkspaceRoot};
 use tempfile::{TempDir, tempdir};
 
@@ -77,6 +78,61 @@ impl IndexRefresh for &RecordingIndex {
 }
 
 type Coordinator<'a> = ExternalEditCoordinator<&'a RecordingIndex>;
+
+/// A live [`Normalizer`] — the thing a running watcher's worker owns — standing
+/// in for the watcher as the sink the coordinator announces its own writes to.
+///
+/// The normalizer is the production type and makes the real decision about
+/// whether a filesystem event is an external edit, so what this proves is not
+/// that a method was called: it is that the receipt the coordinator sends is
+/// the one the watcher needs in order to recognize the write as the
+/// workspace's own.
+struct WatchingNormalizer {
+    root: WorkspaceRoot,
+    normalizer: RefCell<Normalizer>,
+}
+
+impl WatchingNormalizer {
+    fn new(root: &WorkspaceRoot) -> Self {
+        Self {
+            root: root.clone(),
+            normalizer: RefCell::new(Normalizer::new(
+                root.clone(),
+                Vec::new(),
+                Duration::from_secs(60),
+            )),
+        }
+    }
+
+    /// The workspace events the watcher would emit for a write to `path`.
+    fn observe(&self, path: &str) -> Vec<WorkspaceEvent> {
+        self.normalizer
+            .borrow_mut()
+            .normalize(
+                [RawEvent {
+                    kind: RawEventKind::Modify,
+                    rename_mode: None,
+                    tracker: None,
+                    paths: vec![self.root.canonical_path().join(path)],
+                }],
+                Instant::now(),
+            )
+            .expect("normalize")
+    }
+}
+
+impl InternalWriteReceipts for WatchingNormalizer {
+    fn record_internal_write(
+        &self,
+        path: &WorkspacePath,
+        hash: ContentHash,
+    ) -> Result<(), secondbrain_core::Error> {
+        self.normalizer
+            .borrow_mut()
+            .record_internal_write(path.clone(), hash, Instant::now());
+        Ok(())
+    }
+}
 
 /// An initialized temporary workspace.
 struct Workspace {
@@ -1041,7 +1097,20 @@ fn deleted_note_is_reported_without_discarding_identity_or_base() {
         .integrate(WorkspaceEvent::Deleted { path: note_path() })
         .expect("integrate deletion");
 
-    assert_eq!(outcome, ExternalEditOutcome::Deleted { path: note_path() });
+    assert_eq!(
+        outcome,
+        ExternalEditOutcome::Deleted {
+            path: note_path(),
+            note_id: Some(note_id),
+        },
+        "an operator must be told which note the vanished file was"
+    );
+    assert_eq!(
+        index.refreshed(),
+        vec![(note_id, note_path()), (note_id, note_path())],
+        "derived state that still describes a file which is gone would return a \
+         note nobody can open"
+    );
     assert_eq!(workspace.base(note_id), base, "the base survives deletion");
     assert!(
         IdentityMap::open(&workspace.root)
@@ -1552,4 +1621,137 @@ fn recovered_materialization_updates_the_converged_base() {
         internal,
         "recovery converges the note, so it owes the base an update"
     );
+}
+
+#[test]
+fn a_deletion_of_a_path_no_note_claims_names_no_note_and_refreshes_nothing() {
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let mut coordinator = workspace.coordinator(&index);
+
+    let outcome = coordinator
+        .integrate(WorkspaceEvent::Deleted { path: note_path() })
+        .expect("integrate deletion");
+
+    assert_eq!(
+        outcome,
+        ExternalEditOutcome::Deleted {
+            path: note_path(),
+            note_id: None,
+        },
+        "a path the workspace never tracked cannot be attributed to a note"
+    );
+    assert!(
+        index.refreshed().is_empty(),
+        "no note's derived state can be stale for a file no note claimed"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The write a merge performs is the workspace's own
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_write_a_merge_performs_is_announced_so_the_watcher_does_not_re_observe_it() {
+    let base = fixture("converged-base.md");
+    let internal = fixture("internal-rollout-edit.md");
+    let external = fixture("external-paragraph-edit.md");
+    let merged = fixture("merged-migration-and-rollout.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let watcher = WatchingNormalizer::new(&workspace.root);
+    let mut coordinator = workspace.coordinator(&index);
+    let note_id = converge(&workspace, &mut coordinator, NOTE, &base);
+    journal_internal_without_materializing(&workspace, note_id, &base, &internal);
+    workspace.write(NOTE, &external);
+
+    // From here on the coordinator announces every write it causes.
+    let mut coordinator = coordinator.announcing_to(&watcher);
+    let outcome = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect("integrate external edit");
+    assert!(
+        matches!(outcome, ExternalEditOutcome::Merged { .. }),
+        "the merge is the only path that writes: {outcome:?}"
+    );
+    assert_eq!(workspace.read(NOTE), merged);
+
+    // The filesystem event the merge's own write generated now reaches the
+    // watcher, which has to tell it apart from an external editor's save.
+    let observed = watcher.observe(NOTE);
+    assert!(
+        observed.is_empty(),
+        "a write the workspace performed came back as an external edit: {observed:?}"
+    );
+
+    // So the second pass has nothing to integrate. Without the receipt it would
+    // have had the merged content to journal, materialize, and observe again.
+    let journaled = workspace.records(note_id).len();
+    let markers = workspace.markers().len();
+    for event in observed {
+        coordinator.integrate(event).expect("second pass");
+    }
+    assert_eq!(
+        workspace.records(note_id).len(),
+        journaled,
+        "the second pass may journal nothing"
+    );
+    assert_eq!(workspace.markers().len(), markers);
+    assert_eq!(
+        workspace.read(NOTE),
+        merged,
+        "the merged file is final; nothing may rewrite it"
+    );
+}
+
+#[test]
+fn an_adoption_writes_nothing_and_therefore_announces_nothing() {
+    let base = fixture("converged-base.md");
+    let external = fixture("external-paragraph-edit.md");
+    let workspace = workspace();
+    let index = RecordingIndex::default();
+    let watcher = WatchingNormalizer::new(&workspace.root);
+    let mut coordinator = workspace.coordinator(&index);
+    converge(&workspace, &mut coordinator, NOTE, &base);
+    workspace.write(NOTE, &external);
+
+    let mut coordinator = coordinator.announcing_to(&watcher);
+    let outcome = coordinator
+        .integrate(changed(NOTE, &external))
+        .expect("integrate external edit");
+
+    assert!(
+        matches!(outcome, ExternalEditOutcome::Adopted { .. }),
+        "{outcome:?}"
+    );
+    // An adoption leaves the editor's bytes alone, so there is no write of the
+    // workspace's own to announce — and a receipt filed anyway would suppress
+    // the *next* real save of that content.
+    assert_eq!(
+        watcher.observe(NOTE).len(),
+        1,
+        "an unspent receipt would swallow a real external save"
+    );
+}
+
+#[test]
+fn a_running_watcher_is_the_sink_a_coordinator_announces_to() {
+    let workspace = workspace();
+    let watcher = WorkspaceWatcher::start(
+        workspace.root.clone(),
+        Vec::new(),
+        Duration::from_millis(10),
+        Duration::from_secs(2),
+        Duration::from_secs(60),
+    )
+    .expect("start the watcher");
+
+    // The coordinator holds its sink as `dyn InternalWriteReceipts`-shaped
+    // behaviour, and this is the implementation a real process wires in. The
+    // worker timestamps and acknowledges the receipt before the call returns,
+    // so a successful return is the watcher having it in hand — which is
+    // precisely the ordering the suppression depends on.
+    let sink: &dyn InternalWriteReceipts = &watcher;
+    sink.record_internal_write(&note_path(), ContentHash::digest("merged"))
+        .expect("a live watcher must accept the receipt");
 }

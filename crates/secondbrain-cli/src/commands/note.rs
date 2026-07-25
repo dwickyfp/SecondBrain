@@ -95,9 +95,11 @@ pub fn inspect(format: Format, workspace: &Path, path: &str) -> Result<u8, CliEr
     let workspace = Workspace::open(workspace)?;
     let note_path = WorkspacePath::new(path)?;
     let database = workspace.open_index()?;
-    let summary = database
-        .note_by_path(note_path.as_str())?
-        .ok_or_else(|| CliError::NoteNotIndexed(path.to_owned()))?;
+    let summary = database.note_by_path(note_path.as_str())?.ok_or_else(|| {
+        CliError::Core(secondbrain_core::Error::NoteNotIndexed {
+            path: note_path.as_path().to_path_buf(),
+        })
+    })?;
 
     let source = read_file("read note", &workspace.root().resolve(&note_path)?)?;
     let source_hash = ContentHash::digest(source.as_bytes());

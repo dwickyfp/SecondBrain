@@ -127,6 +127,52 @@ impl BaseSnapshotStore {
         Ok(Some(snapshot))
     }
 
+    /// Every converged base this workspace has recorded, ordered by path.
+    ///
+    /// This is the roster of notes the workspace has agreed on at least once,
+    /// and therefore the only notes an external edit can be measured against.
+    /// A one-shot reconciliation needs exactly that set, and asking here keeps
+    /// the record layout — one file per note under `.secondbrain/` — the
+    /// store's own business rather than something a caller re-derives.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the directory cannot be read, or if any record in it
+    /// cannot be parsed or understood. One unreadable base is not skipped, for
+    /// the reason [`Self::load`] gives: a caller told "this note has no base"
+    /// would treat its next edit as the note's first observation.
+    pub fn list(&self) -> Result<Vec<BaseSnapshot>, SnapshotError> {
+        let entries = match fs::read_dir(&self.directory) {
+            Ok(entries) => entries,
+            // A workspace that has converged nothing has no directory yet, and
+            // that is an empty roster rather than a failure.
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => return Err(SnapshotError::Io(source)),
+        };
+        let mut snapshots = Vec::new();
+        for entry in entries {
+            let path = entry?.path();
+            // A file this store did not write is not a record it may read.
+            let Some(note_id) = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.parse::<NoteId>().ok())
+            else {
+                continue;
+            };
+            if let Some(snapshot) = self.load(note_id)? {
+                snapshots.push(snapshot);
+            }
+        }
+        snapshots.sort_by(|left, right| {
+            left.path
+                .as_str()
+                .cmp(right.path.as_str())
+                .then_with(|| left.note_id.to_string().cmp(&right.note_id.to_string()))
+        });
+        Ok(snapshots)
+    }
+
     /// Records `source` as the converged base of `note_id` at `version`.
     ///
     /// # Errors
@@ -203,6 +249,57 @@ mod tests {
             !loaded.describes(ContentHash::digest("# Note\n\nEdited elsewhere.\n")),
             "a file an external editor rewrote is not the state this base records"
         );
+    }
+
+    #[test]
+    fn a_workspace_that_converged_nothing_lists_no_bases() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let root = WorkspaceRoot::open(directory.path()).expect("root");
+
+        let listed = BaseSnapshotStore::new(&root).list().expect("list");
+
+        assert!(
+            listed.is_empty(),
+            "a missing directory is an empty roster, not a failure"
+        );
+    }
+
+    #[test]
+    fn listed_bases_are_ordered_by_path_and_exclude_files_the_store_did_not_write() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let root = WorkspaceRoot::open(directory.path()).expect("root");
+        let store = BaseSnapshotStore::new(&root);
+        let second = NoteId::new();
+        let first = NoteId::new();
+        store
+            .save(
+                second,
+                &WorkspacePath::new("notes/z.md").expect("path"),
+                NoteVersion::new(2),
+                "# Z\n",
+            )
+            .expect("save");
+        store
+            .save(
+                first,
+                &WorkspacePath::new("notes/a.md").expect("path"),
+                NoteVersion::new(1),
+                "# A\n",
+            )
+            .expect("save");
+        fs::write(store.directory.join("notes.txt"), "not a record").expect("write foreign file");
+
+        let listed = store.list().expect("list");
+
+        assert_eq!(
+            listed
+                .iter()
+                .map(|snapshot| snapshot.note_id)
+                .collect::<Vec<_>>(),
+            vec![first, second],
+            "an operator reads this roster, so its order cannot depend on the filesystem"
+        );
+        assert_eq!(listed[0].source, "# A\n");
     }
 
     #[test]

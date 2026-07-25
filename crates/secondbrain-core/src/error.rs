@@ -3,7 +3,7 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
-use crate::id::{IdParseError, NoteId};
+use crate::id::{IdParseError, NoteId, NoteVersion};
 use crate::path::WorkspacePathError;
 
 /// A source error that can cross thread boundaries.
@@ -49,6 +49,31 @@ pub enum Error {
         /// The duplicated note ID.
         note_id: NoteId,
         /// A path containing the duplicate declaration.
+        path: PathBuf,
+    },
+    /// A note's file no longer holds the content the workspace converged on.
+    ///
+    /// An editor outside the workspace saved over the note and nothing
+    /// journaled that edit, so the note's recorded history no longer describes
+    /// the bytes on disk. Every operation that derives a change from the
+    /// converged base — planning, adopting, replaying — is wrong until the edit
+    /// is reconciled, which is why this is a condition of its own rather than a
+    /// stale precondition: no version was superseded, the workspace simply
+    /// never saw what happened.
+    NoteDiverged {
+        /// The affected workspace path.
+        path: PathBuf,
+        /// The version of the base the file no longer holds.
+        version: NoteVersion,
+    },
+    /// A note is absent from the derived index.
+    ///
+    /// Distinct from the index itself being missing or unreadable: the index
+    /// answered, and the answer was that it does not know this note. The index
+    /// is derived state, so this is repaired by rebuilding it and never by
+    /// changing the Markdown.
+    NoteNotIndexed {
+        /// The workspace path that was asked about.
         path: PathBuf,
     },
     /// A resource changed after a caller observed it.
@@ -108,6 +133,8 @@ impl Error {
             Self::InvalidMarkdown { .. } => "SB-MD-INVALID",
             Self::UnsupportedEncoding { .. } => "SB-MD-ENCODING",
             Self::DuplicateNoteId { .. } => "SB-NOTE-DUPLICATE-ID",
+            Self::NoteDiverged { .. } => "SB-NOTE-DIVERGED",
+            Self::NoteNotIndexed { .. } => "SB-NOTE-NOT-INDEXED",
             Self::StalePrecondition { .. } => "SB-TXN-STALE-PRECONDITION",
             Self::TransactionState { .. } => "SB-TXN-STATE",
             Self::CorruptRecord { .. } => "SB-STORE-CORRUPT",
@@ -153,6 +180,19 @@ impl fmt::Display for Error {
             Self::DuplicateNoteId { note_id, path } => write!(
                 formatter,
                 "duplicate note ID {note_id} at {}",
+                path.display()
+            ),
+            Self::NoteDiverged { path, version } => write!(
+                formatter,
+                "{} on disk is not the content the workspace last converged on (base version \
+                 {}); that edit was made outside the workspace and has not been journaled, so \
+                 it must be reconciled before anything derives a change from that base",
+                path.display(),
+                version.get()
+            ),
+            Self::NoteNotIndexed { path } => write!(
+                formatter,
+                "note {} is not in the derived index; rebuilding the index restores it",
                 path.display()
             ),
             Self::StalePrecondition {

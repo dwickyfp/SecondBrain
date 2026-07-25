@@ -471,3 +471,44 @@ fn record_file_has_version_field() {
         "record must have a version field: {contents}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Additional: naming the note at a path whose file is gone
+// ---------------------------------------------------------------------------
+
+#[test]
+fn note_at_names_the_note_currently_living_at_a_path() {
+    let (_temp, root) = fresh_workspace();
+    let body = "# Deleted Later\n\nStill here for now.\n";
+    let (hash, fp) = fingerprint_of(body);
+    let path = WorkspacePath::new("Notes/present.md").expect("path");
+    let mut map = IdentityMap::open(&root).expect("open map");
+    let id = map.register(&path, hash, fp).expect("register");
+
+    // The file itself is irrelevant: a deletion is exactly the case where the
+    // content is gone and only the record can say what was lost.
+    assert_eq!(map.note_at(&path), Some(id));
+    assert_eq!(
+        map.note_at(&WorkspacePath::new("Notes/never-existed.md").expect("path")),
+        None
+    );
+}
+
+#[test]
+fn note_at_does_not_follow_a_path_the_note_has_moved_away_from() {
+    let (_temp, root) = fresh_workspace();
+    let body = "# Moved\n\nContent.\n";
+    let (hash, fp) = fingerprint_of(body);
+    let old = WorkspacePath::new("Notes/old.md").expect("old path");
+    let new = WorkspacePath::new("Notes/new.md").expect("new path");
+    let mut map = IdentityMap::open(&root).expect("open map");
+    let id = map.register(&old, hash, fp).expect("register");
+    map.update_path(&id, &new).expect("record the move");
+
+    assert_eq!(map.note_at(&new), Some(id));
+    assert_eq!(
+        map.note_at(&old),
+        None,
+        "the old path disappearing is the move completing, not the note being lost"
+    );
+}

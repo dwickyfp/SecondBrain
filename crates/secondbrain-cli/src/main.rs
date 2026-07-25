@@ -93,6 +93,11 @@ enum Command {
         #[command(subcommand)]
         command: RecoveryCommand,
     },
+    /// Journal the edits made to tracked notes outside the workspace.
+    Reconcile {
+        /// The workspace directory.
+        workspace: PathBuf,
+    },
     /// Report on the health of a workspace.
     Doctor {
         /// The workspace directory.
@@ -185,6 +190,7 @@ fn dispatch(format: Format, command: Command) -> Result<u8, CliError> {
         Command::Recovery {
             command: RecoveryCommand::Check { workspace },
         } => commands::recovery::check(format, &workspace),
+        Command::Reconcile { workspace } => commands::reconcile::run(format, &workspace),
         Command::Doctor { workspace } => commands::doctor::run(format, &workspace),
     }
 }

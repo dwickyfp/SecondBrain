@@ -46,6 +46,8 @@ pub enum CliError {
     #[error("{0}")]
     Snapshot(#[from] secondbrain_transaction::SnapshotError),
     #[error("{0}")]
+    ExternalEdit(#[from] secondbrain_transaction::ExternalEditError),
+    #[error("{0}")]
     Markdown(#[from] secondbrain_markdown::parse::ParseError),
     #[error("invalid actor or device identity: {0}")]
     Identity(#[from] IdentityError),
@@ -63,8 +65,6 @@ pub enum CliError {
     },
     #[error("no index at {}; run `secondbrain index rebuild` first", .0.display())]
     IndexMissing(PathBuf),
-    #[error("note {0} is not in the index; run `secondbrain index rebuild` first")]
-    NoteNotIndexed(String),
     #[error("plan file is not valid JSON: {source}")]
     PlanUnreadable {
         #[source]
@@ -82,12 +82,6 @@ pub enum CliError {
     },
     #[error("this change is ambiguous and needs review: {0}")]
     ReviewRequired(String),
-    #[error(
-        "{path} on disk is not the content the workspace last converged on (base version \
-         {version}); that external edit has not been journaled, so a plan derived here would \
-         record a version the file never held"
-    )]
-    NoteDiverged { path: String, version: u64 },
 }
 
 impl CliError {
@@ -97,20 +91,23 @@ impl CliError {
         match self {
             Self::Core(error) => error.code(),
             Self::Index(_) | Self::IndexQuery(_) => "SB-INDEX",
-            Self::Transaction(_) | Self::Snapshot(_) => "SB-TXN",
+            // One code for the transaction layer's failures, whichever of its
+            // error types carried them: an operator branching on this has the
+            // same work to do either way, and the message says which.
+            Self::Transaction(_) | Self::Snapshot(_) | Self::ExternalEdit(_) => "SB-TXN",
             Self::Markdown(_) => "SB-MD-INVALID",
             Self::Identity(_) => "SB-ID-INVALID",
             Self::Encode(_) => "SB-OUTPUT-ENCODE",
             Self::Io { .. } => "SB-IO",
-            // The index is missing; the note is merely not in one that exists.
-            // An operator branching on these has different work to do.
+            // The index being absent is this binary's problem to name: it is
+            // the one who decided not to create an empty one. A note missing
+            // from an index that answered is the domain's, and is named in
+            // `secondbrain_core::Error` so every surface reports it alike.
             Self::IndexMissing(_) => "SB-INDEX-MISSING",
-            Self::NoteNotIndexed(_) => "SB-NOTE-NOT-INDEXED",
             Self::PlanUnreadable { .. } | Self::PlanFormat { .. } | Self::PlanWorkspace { .. } => {
                 "SB-PLAN-INVALID"
             }
             Self::ReviewRequired(_) => "SB-REVIEW-REQUIRED",
-            Self::NoteDiverged { .. } => "SB-NOTE-DIVERGED",
         }
     }
 
@@ -123,7 +120,9 @@ impl CliError {
     #[must_use]
     pub const fn exit_code(&self) -> u8 {
         match self {
-            Self::ReviewRequired(_) | Self::NoteDiverged { .. } => REVIEW_REQUIRED,
+            Self::ReviewRequired(_) | Self::Core(secondbrain_core::Error::NoteDiverged { .. }) => {
+                REVIEW_REQUIRED
+            }
             _ => FAILED,
         }
     }
@@ -196,6 +195,12 @@ mod tests {
                 "SB-TXN",
             ),
             (
+                CliError::ExternalEdit(secondbrain_transaction::ExternalEditError::Transaction(
+                    secondbrain_transaction::TransactionError::VersionOverflow,
+                )),
+                "SB-TXN",
+            ),
+            (
                 CliError::Markdown(secondbrain_markdown::parse::ParseError::UpstreamPanic(
                     "the parser gave up".into(),
                 )),
@@ -222,7 +227,9 @@ mod tests {
                 "SB-INDEX-MISSING",
             ),
             (
-                CliError::NoteNotIndexed("notes/alpha.md".into()),
+                CliError::Core(secondbrain_core::Error::NoteNotIndexed {
+                    path: PathBuf::from("notes/alpha.md"),
+                }),
                 "SB-NOTE-NOT-INDEXED",
             ),
             (
@@ -250,10 +257,10 @@ mod tests {
                 "SB-REVIEW-REQUIRED",
             ),
             (
-                CliError::NoteDiverged {
-                    path: "notes/alpha.md".into(),
-                    version: NoteVersion::new(1).get(),
-                },
+                CliError::Core(secondbrain_core::Error::NoteDiverged {
+                    path: PathBuf::from("notes/alpha.md"),
+                    version: NoteVersion::new(1),
+                }),
                 "SB-NOTE-DIVERGED",
             ),
         ]
@@ -281,7 +288,8 @@ mod tests {
     fn only_the_failures_a_person_must_decide_use_the_review_exit_code() {
         for (error, _) in every_variant() {
             let expected = match error {
-                CliError::ReviewRequired(_) | CliError::NoteDiverged { .. } => REVIEW_REQUIRED,
+                CliError::ReviewRequired(_)
+                | CliError::Core(secondbrain_core::Error::NoteDiverged { .. }) => REVIEW_REQUIRED,
                 _ => FAILED,
             };
             assert_eq!(
@@ -307,9 +315,45 @@ mod tests {
     #[test]
     fn a_note_absent_from_a_present_index_does_not_claim_the_index_is_missing() {
         assert_ne!(
-            CliError::NoteNotIndexed("notes/alpha.md".into()).code(),
+            CliError::Core(secondbrain_core::Error::NoteNotIndexed {
+                path: PathBuf::from("notes/alpha.md"),
+            })
+            .code(),
             CliError::IndexMissing(PathBuf::from(".secondbrain/index.sqlite")).code(),
             "one of these is fixed by a rebuild of an index that exists"
         );
+    }
+
+    /// The two conditions that are the domain's rather than this binary's.
+    ///
+    /// A note that diverged from its converged base and a note absent from the
+    /// derived index are facts about a workspace, not about a command line.
+    /// They are defined once in `secondbrain_core::Error` so the MCP server and
+    /// the local API report the codes this binary reports, instead of each
+    /// surface minting its own name for the same condition.
+    #[test]
+    fn the_shared_conditions_answer_the_taxonomy_code_rather_than_a_local_one() {
+        for (error, code) in [
+            (
+                secondbrain_core::Error::NoteDiverged {
+                    path: PathBuf::from("notes/alpha.md"),
+                    version: NoteVersion::new(1),
+                },
+                "SB-NOTE-DIVERGED",
+            ),
+            (
+                secondbrain_core::Error::NoteNotIndexed {
+                    path: PathBuf::from("notes/alpha.md"),
+                },
+                "SB-NOTE-NOT-INDEXED",
+            ),
+        ] {
+            assert_eq!(error.code(), code);
+            assert_eq!(
+                CliError::Core(error).code(),
+                code,
+                "the CLI must report the taxonomy's code, not one of its own"
+            );
+        }
     }
 }
