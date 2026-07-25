@@ -6,6 +6,7 @@
 //! encoding of local operation records for the pre-CRDT recovery plumbing.
 //! This format is **not** a network envelope — it is for local persistence only.
 
+pub mod oplog;
 pub mod record;
 
 pub use record::{
