@@ -9,20 +9,16 @@
 use std::path::Path;
 
 use secondbrain_core::hash::ContentHash;
-use secondbrain_core::id::NoteVersion;
 use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::SourceDocument;
 use secondbrain_markdown::diff::diff_documents;
-use secondbrain_transaction::base_snapshot::BaseSnapshotStore;
+use secondbrain_vault::base_snapshot::{BaseSnapshotStore, GENESIS_VERSION};
 use serde::Serialize;
 
 use crate::exit::{CliError, OK, REVIEW_REQUIRED, read_file};
 use crate::output::{Format, Report, emit, plural};
 use crate::plan::{PLAN_FORMAT, TransactionPlan, needs_review};
 use crate::workspace::Workspace;
-
-/// The version a note's converged base starts at, before any transaction.
-const GENESIS_VERSION: NoteVersion = NoteVersion::new(0);
 
 /// Where a written plan ended up.
 #[derive(Serialize)]

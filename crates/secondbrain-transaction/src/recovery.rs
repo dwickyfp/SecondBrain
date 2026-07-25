@@ -8,8 +8,8 @@ use secondbrain_core::hash::ContentHash;
 use secondbrain_core::id::{NoteId, TransactionId};
 use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::apply::apply_operations;
+use secondbrain_vault::base_snapshot::BaseSnapshotStore;
 
-use crate::base_snapshot::BaseSnapshotStore;
 use crate::engine::{TransactionEngine, TransactionError};
 use crate::marker::DurableState;
 use crate::oplog::LocalMutationLog;

@@ -1,7 +1,10 @@
 use std::fs;
 use std::path::Path;
 
+use secondbrain_core::id::NoteId;
 use secondbrain_index::{IndexConfig, IndexError, logical_dump, rebuild};
+use secondbrain_vault::WorkspaceRoot;
+use secondbrain_vault::base_snapshot::{BaseSnapshotStore, GENESIS_VERSION};
 use tempfile::tempdir;
 
 const ALPHA_ID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -155,6 +158,118 @@ fn fixture_workspace_is_stable() {
     copy_tree(&fixture, dir.path());
     let report = rebuild(dir.path(), &IndexConfig::default()).unwrap();
     assert_eq!(report.indexed, 3);
+}
+
+// ---------------------------------------------------------------------------
+// Converged bases
+// ---------------------------------------------------------------------------
+//
+// Indexing is where the workspace takes responsibility for a note, so it is
+// where the note's first converged base is recorded. Without one there is
+// nothing an external editor's next save can be measured against, and the whole
+// external-edit pipeline has no way to start.
+
+const PLAIN_ALPHA: &str = "# Alpha\n\nAlpha links to [[beta]].\n";
+const PLAIN_BETA: &str = "# Beta\n\nBeta stands alone.\n";
+
+/// A workspace of ordinary Markdown — no frontmatter, no identity declared.
+fn plain_workspace(root: &Path) {
+    fs::create_dir_all(root.join("notes")).unwrap();
+    fs::write(root.join("notes/alpha.md"), PLAIN_ALPHA).unwrap();
+    fs::write(root.join("notes/beta.md"), PLAIN_BETA).unwrap();
+}
+
+fn bases(root: &Path) -> BaseSnapshotStore {
+    BaseSnapshotStore::new(&WorkspaceRoot::open(root).unwrap())
+}
+
+/// The note id the index assigned to a workspace path.
+fn indexed_id(root: &Path, path: &str) -> NoteId {
+    logical_dump(secondbrain_index::index_path(root))
+        .unwrap()
+        .notes
+        .into_iter()
+        .find(|note| note.path == path)
+        .unwrap_or_else(|| panic!("{path} was not indexed"))
+        .note_id
+        .parse()
+        .unwrap()
+}
+
+#[test]
+fn indexing_records_a_genesis_base_without_touching_a_note() {
+    let dir = tempdir().unwrap();
+    plain_workspace(dir.path());
+
+    rebuild(dir.path(), &IndexConfig::default()).unwrap();
+
+    let store = bases(dir.path());
+    for (path, source) in [
+        ("notes/alpha.md", PLAIN_ALPHA),
+        ("notes/beta.md", PLAIN_BETA),
+    ] {
+        let base = store
+            .load(indexed_id(dir.path(), path))
+            .unwrap()
+            .unwrap_or_else(|| panic!("{path} was indexed without a converged base"));
+        assert_eq!(base.version, GENESIS_VERSION);
+        assert_eq!(base.source, source);
+        assert_eq!(base.path.as_str(), path);
+        assert_eq!(
+            fs::read_to_string(dir.path().join(path)).unwrap(),
+            source,
+            "recording a base is workspace state; it may not touch a byte of a note"
+        );
+    }
+}
+
+#[test]
+fn a_workspace_whose_notes_have_no_base_is_healed_by_the_next_rebuild() {
+    let dir = tempdir().unwrap();
+    plain_workspace(dir.path());
+    rebuild(dir.path(), &IndexConfig::default()).unwrap();
+    let alpha = indexed_id(dir.path(), "notes/alpha.md");
+    // What a workspace indexed by a build that recorded no bases looks like.
+    fs::remove_dir_all(dir.path().join(".secondbrain/snapshots")).unwrap();
+    assert!(bases(dir.path()).load(alpha).unwrap().is_none());
+
+    rebuild(dir.path(), &IndexConfig::default()).unwrap();
+
+    let base = bases(dir.path())
+        .load(alpha)
+        .unwrap()
+        .expect("a tracked note with no base gets one from its current content");
+    assert_eq!(base.version, GENESIS_VERSION);
+    assert_eq!(base.source, PLAIN_ALPHA);
+    assert_eq!(
+        indexed_id(dir.path(), "notes/alpha.md"),
+        alpha,
+        "healing a base must not give the note a new identity"
+    );
+}
+
+#[test]
+fn a_rebuild_never_adopts_an_external_edit_into_the_base() {
+    let dir = tempdir().unwrap();
+    plain_workspace(dir.path());
+    rebuild(dir.path(), &IndexConfig::default()).unwrap();
+    let alpha = indexed_id(dir.path(), "notes/alpha.md");
+    // An editor outside the workspace saved over the note. Nothing has
+    // journaled that edit yet; `reconcile` is what does.
+    fs::write(
+        dir.path().join("notes/alpha.md"),
+        "# Alpha\n\nAlpha links to [[beta]] after the retro.\n",
+    )
+    .unwrap();
+
+    rebuild(dir.path(), &IndexConfig::default()).unwrap();
+
+    assert_eq!(
+        bases(dir.path()).load(alpha).unwrap().unwrap().source,
+        PLAIN_ALPHA,
+        "moving the base to the editor's bytes would adopt the edit silently — \
+         unattributed, unjournaled, and with nothing left to recover it from"
+    );
 }
 
 fn copy_tree(source: &Path, destination: &Path) {

@@ -22,6 +22,7 @@ use secondbrain_core::id::{NoteId, NoteVersion, TransactionId};
 use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::SourceDocument;
 use secondbrain_markdown::diff::diff_documents;
+use secondbrain_transaction::oplog::LocalMutationLog;
 use secondbrain_transaction::{TransactionEngine, TransactionRequest, failpoint};
 use secondbrain_vault::{WorkspaceRoot, load_manifest};
 use serde_json::Value;
@@ -83,8 +84,19 @@ impl Vault {
 
     /// An initialized, indexed workspace holding two linked notes.
     fn indexed() -> Self {
+        Self::indexed_with(ALPHA_SOURCE)
+    }
+
+    /// [`Vault::indexed`], with `ALPHA` holding `contents` from the start.
+    ///
+    /// A test that needs the workspace to have converged on something other
+    /// than [`ALPHA_SOURCE`] writes it before indexing rather than over an
+    /// indexed note: indexing is where the workspace takes responsibility for a
+    /// note, and a write to a note it already tracks is an external edit that
+    /// `reconcile`, not a rebuild, is what answers.
+    fn indexed_with(contents: &str) -> Self {
         let vault = Self::empty();
-        vault.write(ALPHA, ALPHA_SOURCE);
+        vault.write(ALPHA, contents);
         vault.write(BETA, BETA_SOURCE);
         secondbrain().args(["init", vault.arg()]).assert().success();
         secondbrain()
@@ -506,12 +518,10 @@ fn diff_prints_the_plan_when_no_output_file_is_named() {
 
 #[test]
 fn diff_of_an_ambiguous_change_requires_review() {
-    let vault = Vault::indexed();
-    vault.write(ALPHA, "Duplicate.\n\nSome middle.\n\nDuplicate.\n");
-    secondbrain()
-        .args(["index", "rebuild", vault.arg()])
-        .assert()
-        .success();
+    // The workspace converged on two identical paragraphs, which is the state
+    // in which a change to one of them cannot be attributed to either without
+    // a person saying which.
+    let vault = Vault::indexed_with("Duplicate.\n\nSome middle.\n\nDuplicate.\n");
     let incoming = vault.scratch("incoming.md");
     fs::write(&incoming, "Duplicate.\n\nSome middle.\n\nChanged.\n").expect("write");
 
@@ -723,12 +733,7 @@ fn transaction_apply_refuses_a_plan_whose_precondition_moved() {
 
 #[test]
 fn transaction_apply_refuses_a_plan_that_needs_review() {
-    let vault = Vault::indexed();
-    vault.write(ALPHA, "Duplicate.\n\nSome middle.\n\nDuplicate.\n");
-    secondbrain()
-        .args(["index", "rebuild", vault.arg()])
-        .assert()
-        .success();
+    let vault = Vault::indexed_with("Duplicate.\n\nSome middle.\n\nDuplicate.\n");
     let plan = plan_for_expecting(
         &vault,
         "Duplicate.\n\nSome middle.\n\nChanged.\n",
@@ -1128,9 +1133,10 @@ fn doctor_reports_a_workspace_that_was_never_initialized() {
 
 /// Applies `contents` to `ALPHA` through the diff/apply pair.
 ///
-/// That pair is what records a converged base, which is the state a later
-/// external edit is measured against — so this is how a test puts a note into
-/// the condition `reconcile` exists to resolve.
+/// This is how a test moves a tracked note on from the base indexing recorded
+/// for it. Writing the file directly is what an editor outside the workspace
+/// does, and the product treats it as exactly that — which is the condition
+/// these cases put the note into deliberately, one step later.
 fn converge_alpha(vault: &Vault, contents: &str) {
     let plan = plan_for(vault, contents);
     secondbrain()
@@ -1375,9 +1381,126 @@ fn reconcile_of_an_ambiguous_edit_files_it_for_review_rather_than_guessing() {
     assert_eq!(doctor["reviews_pending"], 1, "{doctor}");
 }
 
+/// The external-edit pipeline, driven the way an operator drives it.
+///
+/// Every other case in this section hands the workspace a converged base built
+/// by a transaction first, so none of them can tell whether the product is able
+/// to establish the first one at all. This one starts from ordinary Markdown
+/// and uses nothing but `init`, `index rebuild` and `reconcile` — which is what
+/// "External edits become deterministic semantic operations" has to mean on a
+/// real vault.
+#[test]
+fn indexing_a_plain_vault_makes_a_later_external_edit_reconcilable() {
+    let vault = Vault::empty();
+    vault.write(ALPHA, ALPHA_SOURCE);
+    vault.write(BETA, BETA_SOURCE);
+
+    secondbrain().args(["init", vault.arg()]).assert().success();
+    secondbrain()
+        .args(["index", "rebuild", vault.arg()])
+        .assert()
+        .success();
+
+    // Taking responsibility for a note is what gives it a converged base, and
+    // it is not something a person can be asked to arrange by hand.
+    for path in [ALPHA, BETA] {
+        let (code, note) = run_json(&["note", "inspect", vault.arg(), path]);
+        assert_eq!(code, OK, "{note}");
+        assert_eq!(
+            note["converged"], true,
+            "indexing must leave {path} with a base an editor can diverge from: {note}"
+        );
+        assert_eq!(
+            note["converged_version"], 0,
+            "the first base a note ever gets is its genesis: {note}"
+        );
+    }
+    assert_eq!(
+        (vault.read(ALPHA), vault.read(BETA)),
+        (ALPHA_SOURCE.to_owned(), BETA_SOURCE.to_owned()),
+        "recording a base is workspace state; it may not touch a byte of any note"
+    );
+
+    // An editor that is not this workspace saves the whole file over the note.
+    let external = "# Alpha\n\nAlpha links to [[beta]] after the retro.\n";
+    vault.write(ALPHA, external);
+
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(report["considered"], 2, "{report}");
+    let alpha = reconciled(&report, ALPHA);
+    assert_eq!(alpha["outcome"], "adopted", "{report}");
+    assert_eq!(alpha["version"], 1, "{report}");
+    let transaction_id: TransactionId = alpha["transaction_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("an adopted edit is a transaction: {report}"))
+        .parse()
+        .expect("a canonical transaction id");
+    assert_eq!(report["adopted"], 1, "{report}");
+    assert_eq!(
+        reconciled(&report, BETA)["outcome"],
+        "unchanged",
+        "{report}"
+    );
+    assert_eq!(
+        vault.read(ALPHA),
+        external,
+        "reconcile journals what the editor wrote; it never rewrites the file"
+    );
+    assert_eq!(
+        vault.read(BETA),
+        BETA_SOURCE,
+        "a note nobody edited comes out of a reconciliation byte-identical"
+    );
+
+    // The edit is a semantic operation in the note's own journal, attributed to
+    // the device that made it — not an opaque overwrite.
+    let note_id = note_id_of(&vault, ALPHA);
+    let replay = LocalMutationLog::open(vault.path(), note_id)
+        .expect("the note has a journal")
+        .replay()
+        .expect("replay the journal");
+    assert!(replay.corruption.is_none(), "{:?}", replay.corruption);
+    let records: Vec<_> = replay
+        .records
+        .iter()
+        .filter(|record| record.transaction_id == transaction_id)
+        .collect();
+    assert!(
+        !records.is_empty(),
+        "the adopted edit must be journaled as operations: {:?}",
+        replay.records
+    );
+    for record in &records {
+        assert_eq!(
+            record.actor_id.as_str(),
+            "external:local",
+            "an external edit is attributed to the editor, not to the workspace"
+        );
+    }
+
+    // And a pass over a workspace that nothing has edited since claims nothing.
+    let (code, again) = run_json(&["reconcile", vault.arg()]);
+    assert_eq!(code, OK, "{again}");
+    assert_eq!(again["considered"], 2, "{again}");
+    assert_eq!(again["adopted"], 0, "{again}");
+    assert_eq!(again["unchanged"], 2, "{again}");
+    assert_eq!(
+        again["index_refreshed"], false,
+        "a pass that changed nothing must not claim to have rebuilt anything: {again}"
+    );
+}
+
 #[test]
 fn reconcile_of_a_workspace_that_converged_nothing_claims_no_work() {
-    let vault = Vault::indexed();
+    // Initialized but never indexed: the workspace has taken responsibility for
+    // no note yet, so nothing has a converged base an editor could have
+    // diverged from — which is the condition this case is about.
+    let vault = Vault::empty();
+    vault.write(ALPHA, ALPHA_SOURCE);
+    vault.write(BETA, BETA_SOURCE);
+    secondbrain().args(["init", vault.arg()]).assert().success();
 
     let (code, report) = run_json(&["reconcile", vault.arg()]);
 

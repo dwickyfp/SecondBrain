@@ -9,7 +9,7 @@ use std::path::Path;
 use secondbrain_core::hash::ContentHash;
 use secondbrain_core::id::{NoteId, NoteVersion};
 use secondbrain_core::path::WorkspacePath;
-use secondbrain_transaction::base_snapshot::BaseSnapshotStore;
+use secondbrain_vault::base_snapshot::BaseSnapshotStore;
 use serde::Serialize;
 
 use crate::exit::{CliError, OK, read_file};

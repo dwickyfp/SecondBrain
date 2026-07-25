@@ -8,6 +8,7 @@ use secondbrain_core::id::NoteId;
 use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::extract::{PropertyValue, extract};
 use secondbrain_markdown::{SourceDocument, parse_metadata};
+use secondbrain_vault::base_snapshot::BaseSnapshotStore;
 use secondbrain_vault::{IdentityMap, RecoveryOutcome, WorkspaceRoot};
 use thiserror::Error;
 
@@ -44,6 +45,8 @@ pub enum IndexError {
     },
     #[error("identity resolution failed for {path}: {message}")]
     Identity { path: String, message: String },
+    #[error("converged base could not be recorded for {path}: {message}")]
+    ConvergedBase { path: String, message: String },
     #[error("SQLite index operation failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
 }
@@ -236,6 +239,21 @@ fn is_markdown(path: &Path) -> bool {
     )
 }
 
+/// Establishes the identity of every note, and the base each one converged at.
+///
+/// These are one step because they answer one question: whether the workspace
+/// has taken responsibility for a note. Identity is the moment it does, and a
+/// note the workspace is responsible for has a converged base — the state an
+/// external editor's next save is measured against. Recording the base anywhere
+/// else would leave a window in which a note is tracked but undiffable, and
+/// leaving it to a caller would make the rule the CLI's rather than the
+/// library's, which the desktop app and the MCP server would each have to
+/// reimplement.
+///
+/// A base that already exists is never rewritten. See
+/// [`BaseSnapshotStore::ensure_genesis`]: a file that has moved past its base
+/// holds an external edit, and reconciliation — not indexing — is what turns
+/// that into attributed history.
 fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
     let workspace = WorkspaceRoot::open(root).map_err(|error| IndexError::Identity {
         path: root.display().to_string(),
@@ -245,8 +263,14 @@ fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
         path: root.display().to_string(),
         message: error.to_string(),
     })?;
+    let bases = BaseSnapshotStore::new(&workspace);
     for note in notes {
         if note.id.is_some() {
+            // The identity came from the note's own frontmatter, so nothing
+            // here established it and the identity map holds no record of it.
+            // The external-edit pipeline resolves notes through that map, so a
+            // base recorded here would belong to a note that pipeline cannot
+            // recognize, and it would be reconciled as a stranger.
             continue;
         }
         let hash = ContentHash::digest(note.source.as_bytes());
@@ -272,6 +296,20 @@ fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
                 });
             }
         });
+        // Whether the identity was just assigned or recovered from an earlier
+        // run, the workspace is now responsible for this note, so it owes it a
+        // base. Doing it for both cases is what heals a workspace indexed by a
+        // build that recorded none.
+        bases
+            .ensure_genesis(
+                note.id.expect("identity established above"),
+                &note.path,
+                &note.source,
+            )
+            .map_err(|error| IndexError::ConvergedBase {
+                path: note.path.to_string(),
+                message: error.to_string(),
+            })?;
     }
     Ok(())
 }

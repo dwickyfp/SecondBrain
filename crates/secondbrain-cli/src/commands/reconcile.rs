@@ -23,8 +23,8 @@ use secondbrain_core::actor::DeviceId;
 use secondbrain_core::hash::ContentHash;
 use secondbrain_core::id::{NoteId, NoteVersion, TransactionId};
 use secondbrain_core::path::WorkspacePath;
-use secondbrain_transaction::base_snapshot::BaseSnapshotStore;
 use secondbrain_transaction::{ExternalEditCoordinator, ExternalEditOutcome};
+use secondbrain_vault::base_snapshot::BaseSnapshotStore;
 use secondbrain_vault::event::WorkspaceEvent;
 use serde::Serialize;
 

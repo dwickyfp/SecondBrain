@@ -11,7 +11,7 @@
 //! An external editor rewrites the whole file, so the new content is already on
 //! disk before the workspace hears about it. The coordinator therefore reads
 //! the file, diffs it against the note's last converged base
-//! ([`crate::base_snapshot`]) to recover the *semantic* operations the editor
+//! ([`secondbrain_vault::base_snapshot`]) to recover the *semantic* operations the editor
 //! performed, and journals those operations without rewriting the file.
 //!
 //! # Convergence
@@ -37,21 +37,20 @@ use secondbrain_markdown::diff::diff_documents;
 use secondbrain_markdown::operation::SemanticOperation;
 use secondbrain_markdown::parse::ParseError;
 use secondbrain_markdown::{Fingerprint, SourceDocument};
+use secondbrain_vault::base_snapshot::{
+    BaseSnapshot, BaseSnapshotStore, GENESIS_VERSION, SnapshotError,
+};
 use secondbrain_vault::event::WorkspaceEvent;
 use secondbrain_vault::watcher::WorkspaceWatcher;
 use secondbrain_vault::{IdentityMap, RecoveryOutcome, WorkspaceRoot};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::base_snapshot::{BaseSnapshot, BaseSnapshotStore, SnapshotError};
 use crate::engine::{TransactionEngine, TransactionError, TransactionRequest};
 use crate::failpoint;
 use crate::oplog::{LocalMutationLog, OplogError};
 use crate::paths;
 use crate::record::LocalOperationRecord;
-
-/// The version a note's converged base starts at, before any transaction.
-const GENESIS_VERSION: NoteVersion = NoteVersion::new(0);
 
 /// The review descriptor format label.
 const REVIEW_FORMAT: &str = "sb-external-review-v1";

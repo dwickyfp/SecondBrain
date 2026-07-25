@@ -16,7 +16,6 @@ use secondbrain_core::id::{NoteId, NoteVersion, TransactionId, WorkspaceId};
 use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::SourceDocument;
 use secondbrain_markdown::diff::diff_documents;
-use secondbrain_transaction::base_snapshot::{BaseSnapshot, BaseSnapshotStore};
 use secondbrain_transaction::external_edit::{
     ExternalEditCoordinator, ExternalEditError, ExternalEditOutcome, IndexRefresh,
     InternalWriteReceipts,
@@ -26,6 +25,7 @@ use secondbrain_transaction::record::LocalOperationRecord;
 use secondbrain_transaction::{
     AbandonedReason, RecoveryAction, TransactionEngine, TransactionError, TransactionRequest,
 };
+use secondbrain_vault::base_snapshot::{BaseSnapshot, BaseSnapshotStore};
 use secondbrain_vault::event::WorkspaceEvent;
 use secondbrain_vault::watcher::{Normalizer, RawEvent, RawEventKind, WorkspaceWatcher};
 use secondbrain_vault::{IdentityMap, WorkspaceRoot};

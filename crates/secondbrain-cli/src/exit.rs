@@ -44,7 +44,7 @@ pub enum CliError {
     #[error("{0}")]
     Transaction(#[from] secondbrain_transaction::TransactionError),
     #[error("{0}")]
-    Snapshot(#[from] secondbrain_transaction::SnapshotError),
+    Snapshot(#[from] secondbrain_vault::SnapshotError),
     #[error("{0}")]
     ExternalEdit(#[from] secondbrain_transaction::ExternalEditError),
     #[error("{0}")]
@@ -188,7 +188,7 @@ mod tests {
                 "SB-TXN",
             ),
             (
-                CliError::Snapshot(secondbrain_transaction::SnapshotError::UnsupportedFormat {
+                CliError::Snapshot(secondbrain_vault::SnapshotError::UnsupportedFormat {
                     note_id: NoteId::new(),
                     format: "sb-base-snapshot-v2".into(),
                 }),

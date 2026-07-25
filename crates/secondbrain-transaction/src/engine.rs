@@ -10,9 +10,9 @@ use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::apply::apply_operations;
 use secondbrain_markdown::operation::SemanticOperation;
 use secondbrain_vault::WorkspaceRoot;
+use secondbrain_vault::base_snapshot::{BaseSnapshotStore, SnapshotError};
 use thiserror::Error;
 
-use crate::base_snapshot::{BaseSnapshotStore, SnapshotError};
 use crate::failpoint;
 use crate::marker::DurableState;
 use crate::oplog::{LocalMutationLog, OplogError};
