@@ -235,9 +235,12 @@ fn inserting_id_without_frontmatter_prepends_block() {
     assert!(patch.changed, "should report a change");
 
     // The patched source should start with a frontmatter block.
+    // Use \r\n-aware check so the test passes on Windows where git may
+    // convert fixture line endings to CRLF.
     assert!(
-        patch.source.starts_with("---\n"),
-        "patched source should start with frontmatter delimiter"
+        patch.source.starts_with("---\n") || patch.source.starts_with("---\r\n"),
+        "patched source should start with frontmatter delimiter, got: {:?}",
+        &patch.source[..10.min(patch.source.len())]
     );
 
     // The id should be in the frontmatter.
@@ -397,7 +400,7 @@ fn ensure_note_id_empty_source() {
 
     assert!(patch.changed);
     assert!(
-        patch.source.starts_with("---\n"),
+        patch.source.starts_with("---\n") || patch.source.starts_with("---\r\n"),
         "should start with frontmatter"
     );
     assert!(
