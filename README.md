@@ -14,9 +14,9 @@ Run the same checks used by CI from the repository root:
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
-cargo deny check
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-features
+cargo deny --locked check -D warnings
 ```
 
 The dependency-policy gate uses `cargo-deny` 0.20.2. Install that exact version when it is not already available:
