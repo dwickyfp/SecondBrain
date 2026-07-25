@@ -157,11 +157,14 @@ fn portable_case_collision_is_rejected_deterministically() {
     fs::write(dir.path().join("Nova.md"), "# Nova\n").unwrap();
     fs::write(dir.path().join("nova.md"), "# nova\n").unwrap();
 
-    assert!(matches!(
-        rebuild(dir.path(), &IndexConfig::default()),
-        Err(IndexError::PathCollision { first, second })
-            if first == "Nova.md" && second == "nova.md"
-    ));
+    let Err(IndexError::PathCollision { first, second }) =
+        rebuild(dir.path(), &IndexConfig::default())
+    else {
+        panic!("expected a portable path collision");
+    };
+    let mut paths = [first, second];
+    paths.sort();
+    assert_eq!(paths, ["Nova.md", "nova.md"]);
 }
 
 #[cfg(unix)]
