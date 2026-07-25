@@ -550,6 +550,135 @@ fn a_rebuild_after_an_external_copy_gives_the_copy_its_own_identity() {
     );
 }
 
+/// A note the workspace has converged on since indexing still keeps its
+/// identity when it is renamed.
+///
+/// Recognizing a rename means matching the file against the evidence — hash and
+/// fingerprint — the identity record holds. That evidence is only worth
+/// anything if it describes the note's *current* content, so it has to move
+/// whenever the workspace agrees on new content. A record left describing the
+/// bytes a note held when it was first registered stops matching the moment the
+/// note is edited, which is every note this product actually works on: the
+/// rename rule would be correct and inert at the same time.
+///
+/// The move keeps the file stem, so `[[beta]]` still names this note.
+#[test]
+fn a_note_edited_before_it_was_renamed_still_keeps_its_identity() {
+    let vault = Vault::indexed();
+    let beta = note_id_of(&vault, BETA);
+    let known_before = tracked_ids(&vault);
+
+    // An external editor moves the note on from the state indexing recorded,
+    // and `reconcile` is what the workspace converges on that edit with.
+    let edited = "# Beta\n\nBeta describes the migration timeline in detail.\n";
+    vault.write(BETA, edited);
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(reconciled(&report, BETA)["outcome"], "adopted", "{report}");
+
+    let moved = "archive/beta.md";
+    fs::create_dir_all(vault.path().join("archive")).expect("create directory");
+    fs::rename(vault.path().join(BETA), vault.path().join(moved))
+        .expect("an external tool renames the note");
+
+    let (code, report) = run_json(&["index", "rebuild", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(report["indexed"], 2, "{report}");
+    assert_eq!(
+        tracked_ids(&vault),
+        known_before,
+        "a note that was edited and then moved is still one note: no second \
+         identity, base or journal may appear"
+    );
+
+    let (code, inspected) = run_json(&["note", "inspect", vault.arg(), moved]);
+    assert_eq!(code, OK, "{inspected}");
+    assert_eq!(
+        inspected["note_id"],
+        beta.to_string(),
+        "an edit before the move may not cost the note its identity: {inspected}"
+    );
+    let backlinks = inspected["backlinks"].as_array().expect("backlinks");
+    assert_eq!(backlinks.len(), 1, "{inspected}");
+    assert_eq!(
+        backlinks[0]["path"], ALPHA,
+        "the link that pointed at this note must still arrive: {inspected}"
+    );
+
+    let root = vault.root();
+    let map = secondbrain_vault::IdentityMap::open(&root).expect("identity map");
+    let record = map
+        .lookup(&beta)
+        .expect("look the record up")
+        .expect("the note kept its record");
+    assert_eq!(record.current_path.as_str(), moved, "{record:?}");
+    assert!(
+        record
+            .historical_paths
+            .contains(&WorkspacePath::new(BETA).expect("path")),
+        "the path the note came from is history, not a claim: {record:?}"
+    );
+    assert_eq!(
+        map.note_at(&WorkspacePath::new(BETA).expect("path")),
+        None,
+        "no record may go on claiming a path that holds no file"
+    );
+
+    assert_eq!(
+        (vault.read(moved), vault.read(ALPHA)),
+        (edited.to_owned(), ALPHA_SOURCE.to_owned()),
+        "recovering an identity is workspace state; it may not touch a note"
+    );
+}
+
+/// Identity evidence and the converged base describe the same bytes, always.
+///
+/// They answer the same question — what this note looks like now — and a build
+/// that refreshed one and forgot the other would leave the rename rule matching
+/// against content the note has moved past. Pinned at the narrowest place the
+/// pair can be observed: straight after a commit.
+#[test]
+fn a_commit_leaves_the_identity_record_describing_what_it_converged_on() {
+    let vault = Vault::indexed();
+    let alpha = note_id_of(&vault, ALPHA);
+
+    converge_alpha(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
+    );
+
+    let root = vault.root();
+    let base = secondbrain_vault::BaseSnapshotStore::new(&root)
+        .load(alpha)
+        .expect("load the converged base")
+        .expect("a committed note has a base");
+    let record = secondbrain_vault::IdentityMap::open(&root)
+        .expect("identity map")
+        .lookup(&alpha)
+        .expect("look the record up")
+        .expect("a tracked note has a record");
+
+    assert_eq!(
+        record.source_hash, base.source_hash,
+        "the identity record must describe the bytes the workspace just \
+         converged on, not the ones it was registered with: {record:?}"
+    );
+    assert_eq!(
+        base.source,
+        vault.read(ALPHA),
+        "and those bytes are the ones on disk"
+    );
+    let fingerprint = SourceDocument::parse(&base.source)
+        .expect("the converged base parses")
+        .semantic_fingerprint();
+    assert_eq!(
+        (record.fingerprint.lo, record.fingerprint.hi),
+        (fingerprint.lo, fingerprint.hi),
+        "the structural evidence must move with the content evidence: {record:?}"
+    );
+}
+
 #[test]
 fn search_finds_a_note_by_its_text() {
     let vault = Vault::indexed();
@@ -1663,19 +1792,37 @@ fn a_note_moved_outside_the_workspace_is_reported_absent_rather_than_deleted() {
         "reconcile never touches a note, least of all one it could not find"
     );
     let root = vault.root();
+    let map = secondbrain_vault::IdentityMap::open(&root).expect("identity map");
     assert_eq!(
-        secondbrain_vault::IdentityMap::open(&root)
-            .expect("identity map")
-            .note_at(&WorkspacePath::new(ALPHA).expect("path")),
+        map.note_at(&WorkspacePath::new(moved).expect("path")),
         Some(note_id),
-        "the note's identity survives a move the workspace never saw"
+        "the index refresh discovers the move and carries the identity with it"
     );
-    assert!(
-        secondbrain_vault::BaseSnapshotStore::new(&root)
-            .load(note_id)
-            .expect("load the converged base")
-            .is_some(),
-        "the converged base survives too, so the note stays reconcilable"
+    assert_eq!(map.note_at(&WorkspacePath::new(ALPHA).expect("path")), None);
+    let base = secondbrain_vault::BaseSnapshotStore::new(&root)
+        .load(note_id)
+        .expect("load the converged base")
+        .expect("the converged base survives");
+    assert_eq!(
+        base.path.as_str(),
+        moved,
+        "the base must follow the identity"
+    );
+    assert_eq!(
+        base.source, converged,
+        "discovering a move changes no content"
+    );
+
+    let (code, second) = run_json(&["reconcile", vault.arg()]);
+    assert_eq!(code, OK, "{second}");
+    assert_eq!(
+        reconciled(&second, moved)["outcome"],
+        "unchanged",
+        "{second}"
+    );
+    assert_eq!(
+        second["absent"], 0,
+        "a discovered move reaches a fixed point: {second}"
     );
 }
 
@@ -1864,6 +2011,36 @@ fn reconcile_of_an_uninitialized_directory_fails() {
         .args(["reconcile", vault.arg()])
         .assert()
         .code(FAILED);
+}
+
+#[test]
+fn indexing_a_note_with_a_declared_id_makes_external_edits_reconcilable() {
+    let vault = Vault::empty();
+    let note_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    let original = format!("---\nid: {note_id}\n---\n# Declared\n\nOriginal content.\n");
+    let external = format!("---\nid: {note_id}\n---\n# Declared\n\nEdited outside.\n");
+    let path = "notes/declared.md";
+    vault.write(path, &original);
+    secondbrain().args(["init", vault.arg()]).assert().success();
+    secondbrain()
+        .args(["index", "rebuild", vault.arg()])
+        .assert()
+        .success();
+
+    let (code, inspected) = run_json(&["note", "inspect", vault.arg(), path]);
+    assert_eq!(code, OK, "{inspected}");
+    assert_eq!(inspected["note_id"], note_id, "{inspected}");
+    assert_eq!(inspected["converged"], true, "{inspected}");
+    assert_eq!(inspected["converged_version"], 0, "{inspected}");
+
+    vault.write(path, &external);
+    let (code, report) = run_json(&["reconcile", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(report["considered"], 1, "{report}");
+    assert_eq!(reconciled(&report, path)["outcome"], "adopted", "{report}");
+    assert_eq!(reconciled(&report, path)["version"], 1, "{report}");
+    assert_eq!(vault.read(path), external);
 }
 
 // ---------------------------------------------------------------------------

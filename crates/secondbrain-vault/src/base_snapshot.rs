@@ -34,6 +34,7 @@ use std::path::{Path, PathBuf};
 use secondbrain_core::hash::ContentHash;
 use secondbrain_core::id::{NoteId, NoteVersion};
 use secondbrain_core::path::WorkspacePath;
+use secondbrain_markdown::SourceDocument;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -92,6 +93,8 @@ pub enum SnapshotError {
     Json(#[from] serde_json::Error),
     #[error("converged base write failed: {0}")]
     Vault(#[from] secondbrain_core::Error),
+    #[error("converged base could not be parsed for identity evidence: {0}")]
+    Parse(#[from] secondbrain_markdown::parse::ParseError),
     #[error("converged base for {note_id} has unsupported format {format}")]
     UnsupportedFormat {
         /// The note whose record could not be read.
@@ -102,7 +105,11 @@ pub enum SnapshotError {
 }
 
 /// Reads and writes the converged base of every note in one workspace.
+///
+/// It also keeps each note's identity evidence in step with the base it writes
+/// — see [`Self::save`].
 pub struct BaseSnapshotStore {
+    workspace: WorkspaceRoot,
     directory: PathBuf,
 }
 
@@ -112,6 +119,7 @@ impl BaseSnapshotStore {
     pub fn new(workspace: &WorkspaceRoot) -> Self {
         Self {
             directory: snapshot_dir(workspace.canonical_path()),
+            workspace: workspace.clone(),
         }
     }
 
@@ -186,11 +194,33 @@ impl BaseSnapshotStore {
         Ok(snapshots)
     }
 
-    /// Records `source` as the converged base of `note_id` at `version`.
+    /// Records `source` as the converged base of `note_id` at `version`, and
+    /// refreshes the note's identity evidence to the same bytes.
+    ///
+    /// The two move together because they answer the same question: what this
+    /// note looks like now. [`crate::IdentityMap`] recovers a renamed note by
+    /// matching the file against the `source_hash` and `fingerprint` its record
+    /// holds, and a record still describing the note's first observation stops
+    /// matching the moment the note is edited — so a base written without that
+    /// refresh would leave every note the workspace has ever converged on
+    /// unrecoverable across a rename.
+    ///
+    /// Doing it here rather than in each caller is the point. This is the one
+    /// place a converged base is written, from the transaction engine, the
+    /// recovery pass, the external-edit coordinator and indexing alike; a pair
+    /// of independent setters is what let the two drift, and no setter for the
+    /// evidence is exposed outside this crate at all.
+    ///
+    /// Nothing here reads or writes the note itself, and a note whose identity
+    /// is not in the map — one carrying its own frontmatter id — simply has no
+    /// evidence to refresh.
     ///
     /// # Errors
     ///
-    /// Returns an error if the record cannot be serialized or written.
+    /// Returns an error if the record cannot be serialized or written, or if
+    /// `source` is not Markdown this build can parse — the fingerprint is
+    /// derived from its structure, and a base whose evidence could not be
+    /// derived is exactly the drift this method exists to prevent.
     pub fn save(
         &self,
         note_id: NoteId,
@@ -206,12 +236,24 @@ impl BaseSnapshotStore {
             source_hash: ContentHash::digest(source.as_bytes()),
             source: source.to_owned(),
         };
+        let fingerprint = SourceDocument::parse(source)?.semantic_fingerprint();
         let bytes = serde_json::to_vec_pretty(&snapshot)?;
         fs::create_dir_all(&self.directory)?;
         // The record lives under `.secondbrain/`, which `WorkspacePath` rejects,
         // so it is written through the atomic-write helper directly — the same
         // route the identity map takes.
         crate::atomic_write::atomic_write(&self.record_path(note_id), &bytes)?;
+        // The base is written first: a crash between the two leaves a record
+        // describing the note's previous content, which is the state every
+        // build before this one was permanently in — recoverable, and repaired
+        // by the next convergence. A refreshed record with no base behind it
+        // would be evidence for a state nothing recorded.
+        crate::IdentityMap::record_convergence(
+            &self.workspace,
+            note_id,
+            snapshot.source_hash,
+            fingerprint,
+        )?;
         Ok(snapshot)
     }
 
@@ -250,6 +292,28 @@ impl BaseSnapshotStore {
             return Ok(None);
         }
         self.save(note_id, path, GENESIS_VERSION, source).map(Some)
+    }
+
+    /// Moves an existing base to the path its note now occupies.
+    ///
+    /// Only the location changes. The source, hash and version stay exactly as
+    /// they were, so discovering a rename during indexing cannot adopt an
+    /// external content edit as if the workspace had converged on it.
+    pub fn update_path(
+        &self,
+        note_id: NoteId,
+        path: &WorkspacePath,
+    ) -> Result<Option<BaseSnapshot>, SnapshotError> {
+        let Some(mut snapshot) = self.load(note_id)? else {
+            return Ok(None);
+        };
+        if &snapshot.path == path {
+            return Ok(Some(snapshot));
+        }
+        snapshot.path = path.clone();
+        let bytes = serde_json::to_vec_pretty(&snapshot)?;
+        crate::atomic_write::atomic_write(&self.record_path(note_id), &bytes)?;
+        Ok(Some(snapshot))
     }
 
     fn record_path(&self, note_id: NoteId) -> PathBuf {

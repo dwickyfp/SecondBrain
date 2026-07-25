@@ -827,15 +827,18 @@ fn a_rename_that_also_changes_content_converges_the_base_with_the_file() {
     assert_eq!(records.len(), 1, "{records:?}");
     assert_eq!(records[0].actor_id, ActorId::new(EXTERNAL_ACTOR).unwrap());
     assert_eq!(workspace.read("archive/meeting.md"), external);
-    // Pinning what is *not* fixed: the identity record's own hash still
-    // describes the content observed when the note was registered. Nothing in
-    // this pipeline refreshes it — `IdentityMap` exposes no API that does, and
-    // an ordinary content change leaves it equally stale — so this records
-    // today's behaviour rather than endorsing it.
     assert_eq!(
         record.source_hash,
-        ContentHash::digest(base.as_bytes()),
-        "identity hashes are refreshed only at registration"
+        ContentHash::digest(external.as_bytes()),
+        "identity evidence must describe the content the workspace converged on"
+    );
+    let fingerprint = SourceDocument::parse(&external)
+        .expect("external source parses")
+        .semantic_fingerprint();
+    assert_eq!(
+        (record.fingerprint.lo, record.fingerprint.hi),
+        (fingerprint.lo, fingerprint.hi),
+        "identity hash and structural evidence move with the converged base"
     );
 }
 

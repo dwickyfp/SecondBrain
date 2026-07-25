@@ -224,6 +224,61 @@ fn indexing_records_a_genesis_base_without_touching_a_note() {
 }
 
 #[test]
+fn indexing_records_identity_and_genesis_for_notes_that_declare_their_id() {
+    let dir = tempdir().unwrap();
+    valid_workspace(dir.path());
+
+    rebuild(dir.path(), &config()).unwrap();
+
+    let root = WorkspaceRoot::open(dir.path()).unwrap();
+    let map = secondbrain_vault::IdentityMap::open(&root).unwrap();
+    for (path, id) in [
+        ("notes/alpha.md", ALPHA_ID),
+        ("notes/nested/beta.md", BETA_ID),
+        ("gamma.markdown", GAMMA_ID),
+    ] {
+        let note_id: NoteId = id.parse().unwrap();
+        let record = map
+            .lookup(&note_id)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{path} was indexed without an identity record"));
+        assert_eq!(record.current_path.as_str(), path);
+        let base = bases(dir.path())
+            .load(note_id)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{path} was indexed without a converged base"));
+        assert_eq!(base.path.as_str(), path);
+        assert_eq!(base.version, GENESIS_VERSION);
+        assert_eq!(
+            base.source,
+            fs::read_to_string(dir.path().join(path)).unwrap()
+        );
+    }
+}
+
+#[test]
+fn rebuilding_after_a_rename_moves_the_base_without_changing_its_content() {
+    let dir = tempdir().unwrap();
+    plain_workspace(dir.path());
+    rebuild(dir.path(), &IndexConfig::default()).unwrap();
+    let note_id = indexed_id(dir.path(), "notes/alpha.md");
+    let moved = "archive/alpha.md";
+    fs::create_dir_all(dir.path().join("archive")).unwrap();
+    fs::rename(dir.path().join("notes/alpha.md"), dir.path().join(moved)).unwrap();
+
+    rebuild(dir.path(), &IndexConfig::default()).unwrap();
+
+    let base = bases(dir.path()).load(note_id).unwrap().unwrap();
+    assert_eq!(base.path.as_str(), moved);
+    assert_eq!(base.source, PLAIN_ALPHA);
+    assert_eq!(
+        base.source,
+        fs::read_to_string(dir.path().join(moved)).unwrap(),
+        "relocating a base changes neither its source nor the note"
+    );
+}
+
+#[test]
 fn a_workspace_whose_notes_have_no_base_is_healed_by_the_next_rebuild() {
     let dir = tempdir().unwrap();
     plain_workspace(dir.path());

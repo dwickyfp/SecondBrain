@@ -270,50 +270,62 @@ fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
     // path exactly as much as one that does not.
     let present: BTreeSet<WorkspacePath> = notes.iter().map(|note| note.path.clone()).collect();
     for note in notes {
-        if note.id.is_some() {
-            // The identity came from the note's own frontmatter, so nothing
-            // here established it and the identity map holds no record of it.
-            // The external-edit pipeline resolves notes through that map, so a
-            // base recorded here would belong to a note that pipeline cannot
-            // recognize, and it would be reconciled as a stranger.
-            continue;
-        }
         let hash = ContentHash::digest(note.source.as_bytes());
         let fingerprint = note.document.semantic_fingerprint();
-        // Resolved against the scan rather than the file alone: a rebuild is
-        // the one caller that knows which recorded paths still hold a file, and
-        // that is what tells a note that moved from a note that was copied.
-        let outcome = map
-            .resolve_in_scan(&note.path, hash, fingerprint, &present)
-            .map_err(|error| IndexError::Identity {
-                path: note.path.to_string(),
-                message: error.to_string(),
-            })?;
-        note.id = Some(match outcome {
-            RecoveryOutcome::Resolved(id) => id,
-            RecoveryOutcome::New | RecoveryOutcome::Duplicate { .. } => map
-                .register(&note.path, hash, fingerprint)
+        let note_id = if let Some(note_id) = note.id {
+            map.register_known(note_id, &note.path, hash, fingerprint)
                 .map_err(|error| IndexError::Identity {
                     path: note.path.to_string(),
                     message: error.to_string(),
-                })?,
-            RecoveryOutcome::NeedsReview { .. } => {
-                return Err(IndexError::Identity {
+                })?;
+            map.update_path(&note_id, &note.path)
+                .map_err(|error| IndexError::Identity {
                     path: note.path.to_string(),
-                    message: "identity requires review".into(),
-                });
+                    message: error.to_string(),
+                })?;
+            note_id
+        } else {
+            // Resolved against the scan rather than the file alone: a rebuild
+            // is the one caller that knows which recorded paths still hold a
+            // file, and that is what tells a note that moved from a note that
+            // was copied.
+            let outcome = map
+                .resolve_in_scan(&note.path, hash, fingerprint, &present)
+                .map_err(|error| IndexError::Identity {
+                    path: note.path.to_string(),
+                    message: error.to_string(),
+                })?;
+            match outcome {
+                RecoveryOutcome::Resolved(id) => id,
+                RecoveryOutcome::New | RecoveryOutcome::Duplicate { .. } => map
+                    .register(&note.path, hash, fingerprint)
+                    .map_err(|error| IndexError::Identity {
+                        path: note.path.to_string(),
+                        message: error.to_string(),
+                    })?,
+                RecoveryOutcome::NeedsReview { .. } => {
+                    return Err(IndexError::Identity {
+                        path: note.path.to_string(),
+                        message: "identity requires review".into(),
+                    });
+                }
             }
-        });
+        };
+        note.id = Some(note_id);
+        // A full scan may have recovered a move. Keep the old converged bytes,
+        // hash and version, but make their location follow the identity.
+        bases
+            .update_path(note_id, &note.path)
+            .map_err(|error| IndexError::ConvergedBase {
+                path: note.path.to_string(),
+                message: error.to_string(),
+            })?;
         // Whether the identity was just assigned or recovered from an earlier
         // run, the workspace is now responsible for this note, so it owes it a
         // base. Doing it for both cases is what heals a workspace indexed by a
         // build that recorded none.
         bases
-            .ensure_genesis(
-                note.id.expect("identity established above"),
-                &note.path,
-                &note.source,
-            )
+            .ensure_genesis(note_id, &note.path, &note.source)
             .map_err(|error| IndexError::ConvergedBase {
                 path: note.path.to_string(),
                 message: error.to_string(),

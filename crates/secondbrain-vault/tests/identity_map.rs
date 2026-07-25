@@ -596,6 +596,33 @@ fn a_caller_that_cannot_see_the_workspace_still_reads_an_exact_match_as_a_copy()
     }
 }
 
+#[test]
+fn a_declared_identity_is_registered_without_replacing_converged_evidence() {
+    let (_temp, root) = fresh_workspace();
+    let original = "# Declared\n\nOriginal content.\n";
+    let edited = "# Declared\n\nEdited outside the workspace.\n";
+    let (original_hash, original_fp) = fingerprint_of(original);
+    let (edited_hash, edited_fp) = fingerprint_of(edited);
+    let path = WorkspacePath::new("Notes/declared.md").expect("path");
+    let note_id = NoteId::new();
+    let mut map = IdentityMap::open(&root).expect("open map");
+
+    map.register_known(note_id, &path, original_hash, original_fp)
+        .expect("register declared identity");
+    map.register_known(note_id, &path, edited_hash, edited_fp)
+        .expect("an existing declaration is idempotent");
+
+    let record = map.lookup(&note_id).expect("lookup").expect("record");
+    assert_eq!(record.note_id, note_id);
+    assert_eq!(record.current_path, path);
+    assert_eq!(record.source_hash, original_hash);
+    assert_eq!(
+        (record.fingerprint.lo, record.fingerprint.hi),
+        (original_fp.lo, original_fp.hi),
+        "indexing an external edit may not replace the evidence it diverged from"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 7. Interrupted identity-map write preserves previous map
 // ---------------------------------------------------------------------------

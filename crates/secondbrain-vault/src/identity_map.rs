@@ -35,6 +35,16 @@
 //!    is returned with the candidate IDs.
 //! 6. **No matches**: [`RecoveryOutcome::New`] is returned.
 //!
+//! # Keeping the evidence current
+//!
+//! Rules 2 to 5 compare a file against the `source_hash` and `fingerprint` a
+//! record holds, so those are only worth anything while they describe the note
+//! as it is now. Nothing outside this crate can set them: they are refreshed by
+//! [`crate::BaseSnapshotStore::save`], because the workspace agreeing on new
+//! content for a note is exactly the event that makes the old evidence wrong,
+//! and a record refreshed anywhere else would be a record that can drift from
+//! the converged base. See [`IdentityMap::record_convergence`].
+//!
 //! # Privacy
 //!
 //! Records store only workspace-relative paths, content hashes, structural
@@ -226,6 +236,44 @@ impl IdentityMap {
         self.records.push(record);
 
         Ok(id)
+    }
+
+    /// Registers the identity a note declares in its own frontmatter.
+    ///
+    /// Indexing has already rejected two files declaring the same ID before it
+    /// calls this. An existing record is left untouched: its path and content
+    /// evidence describe the last state the workspace converged on, and a
+    /// rebuild must not silently adopt an external edit over that evidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the new record cannot be serialized or written.
+    pub fn register_known(
+        &mut self,
+        note_id: NoteId,
+        path: &WorkspacePath,
+        hash: ContentHash,
+        fingerprint: secondbrain_markdown::Fingerprint,
+    ) -> Result<()> {
+        if self.records.iter().any(|record| record.note_id == note_id) {
+            return Ok(());
+        }
+
+        let record = IdentityRecord {
+            version: RECORD_FORMAT_VERSION,
+            note_id,
+            current_path: path.clone(),
+            historical_paths: vec![path.clone()],
+            source_hash: hash,
+            fingerprint: FingerprintRecord {
+                lo: fingerprint.lo,
+                hi: fingerprint.hi,
+            },
+            last_observed: now_rfc3339_utc(),
+        };
+        self.save_record(&record)?;
+        self.records.push(record);
+        Ok(())
     }
 
     /// Looks up the identity record for a given note ID.
@@ -474,18 +522,27 @@ impl IdentityMap {
     /// Updates the current path of a note's record, preserving the old path
     /// in the historical paths list.
     ///
+    /// The record is re-read from disk before the path is changed. A map is
+    /// loaded once and can be held for the life of a watcher, so the copy in
+    /// memory may predate a convergence that refreshed the record's content
+    /// evidence — and writing that copy back out would silently undo the
+    /// refresh, leaving the evidence describing bytes the note has moved past.
+    ///
     /// # Errors
     ///
     /// Returns an error if the record does not exist or cannot be written.
     pub fn update_path(&mut self, id: &NoteId, new_path: &WorkspacePath) -> Result<()> {
-        let record = self
+        let slot = self
             .records
-            .iter_mut()
-            .find(|r| &r.note_id == id)
+            .iter()
+            .position(|r| &r.note_id == id)
             .ok_or_else(|| Error::CorruptRecord {
                 record: id.to_string(),
                 summary: "identity record not found for path update".into(),
             })?;
+
+        let mut record = current_record(&identity_map_dir(self.root.canonical_path()), id)
+            .unwrap_or_else(|| self.records[slot].clone());
 
         if &record.current_path != new_path {
             if !record.historical_paths.contains(new_path) {
@@ -495,42 +552,63 @@ impl IdentityMap {
             record.last_observed = now_rfc3339_utc();
         }
 
-        // Save the updated record.
-        let record_clone = record.clone();
-        self.save_record(&record_clone)
+        self.save_record(&record)?;
+        self.records[slot] = record;
+        Ok(())
+    }
+
+    /// Refreshes the content evidence of `note_id` to the bytes the workspace
+    /// has just converged on.
+    ///
+    /// This is deliberately not a public setter, and deliberately not a method
+    /// on an opened map. The `source_hash` and `fingerprint` a record carries
+    /// are the workspace's answer to "what does this note look like now", and
+    /// so is the converged base — [`crate::BaseSnapshotStore`] writes both in
+    /// one step so that a caller cannot refresh one and forget the other. Two
+    /// public setters is what let them drift, and drift makes the whole
+    /// rename-recovery strategy inert on any note that has ever been edited.
+    ///
+    /// The record is read from disk and written back, rather than mutated
+    /// through some caller's opened map, because the caller that converges a
+    /// note need not hold one — and because reading the single record this
+    /// touches keeps a per-note write from costing a scan of every record.
+    ///
+    /// A note with no record — one whose identity came from its own
+    /// frontmatter, for instance — has no evidence to refresh, and that is not
+    /// an error. Nor is a record that already describes these bytes: it costs
+    /// no write, which is what lets a rebuild over an unchanged workspace stay
+    /// free.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the refreshed record cannot be serialized or
+    /// written.
+    pub(crate) fn record_convergence(
+        root: &WorkspaceRoot,
+        note_id: NoteId,
+        hash: ContentHash,
+        fingerprint: secondbrain_markdown::Fingerprint,
+    ) -> Result<()> {
+        let directory = identity_map_dir(root.canonical_path());
+        let Some(mut record) = current_record(&directory, &note_id) else {
+            return Ok(());
+        };
+        let refreshed = FingerprintRecord {
+            lo: fingerprint.lo,
+            hi: fingerprint.hi,
+        };
+        if record.source_hash == hash && record.fingerprint == refreshed {
+            return Ok(());
+        }
+        record.source_hash = hash;
+        record.fingerprint = refreshed;
+        record.last_observed = now_rfc3339_utc();
+        write_record(&directory, &record)
     }
 
     /// Saves a record atomically to disk.
     fn save_record(&self, record: &IdentityRecord) -> Result<()> {
-        let json = serde_json::to_string_pretty(record).map_err(|err| Error::CorruptRecord {
-            record: record.note_id.to_string(),
-            summary: format!("identity record serialization failed: {err}"),
-        })?;
-
-        let file_name = format!("{}.{}", record.note_id, RECORD_EXTENSION);
-        let rel_path_str = format!(".secondbrain/{IDENTITY_MAP_DIR}/{file_name}");
-
-        // WorkspacePath rejects paths starting with ".secondbrain", but the
-        // identity-map lives inside .secondbrain. We write directly via the
-        // workspace root's canonical path instead.
-        let target = identity_map_dir(self.root.canonical_path()).join(&file_name);
-
-        // Ensure the directory exists.
-        fs::create_dir_all(target.parent().unwrap_or(Path::new("."))).map_err(|source| {
-            Error::Io {
-                operation: "create identity-map dir",
-                source,
-            }
-        })?;
-
-        // Use the atomic_write function directly (not through WorkspaceRoot,
-        // since the path is under .secondbrain which WorkspacePath rejects).
-        crate::atomic_write::atomic_write(&target, json.as_bytes())?;
-
-        // Suppress unused variable warning — rel_path_str is for documentation.
-        let _ = rel_path_str;
-
-        Ok(())
+        write_record(&identity_map_dir(self.root.canonical_path()), record)
     }
 }
 
@@ -541,6 +619,44 @@ impl IdentityMap {
 /// Returns the path to the identity-map directory under the workspace root.
 fn identity_map_dir(root: &Path) -> PathBuf {
     root.join(".secondbrain").join(IDENTITY_MAP_DIR)
+}
+
+/// The record file one note's identity is filed in.
+fn record_path(directory: &Path, note_id: &NoteId) -> PathBuf {
+    directory.join(format!("{note_id}.{RECORD_EXTENSION}"))
+}
+
+/// The record `note_id` has on disk right now, or `None` when it has none this
+/// build can read.
+///
+/// An unreadable record is treated as absent for the same reason
+/// [`IdentityMap::open`] skips one: a single bad file may not stop the map
+/// working. A caller amending a record it cannot read falls back to whatever it
+/// already holds.
+fn current_record(directory: &Path, note_id: &NoteId) -> Option<IdentityRecord> {
+    let record = load_record(&record_path(directory, note_id)).ok()?;
+    (&record.note_id == note_id).then_some(record)
+}
+
+/// Writes one identity record atomically into `directory`.
+///
+/// `WorkspacePath` rejects paths starting with `.secondbrain`, and the
+/// identity map lives inside it, so the atomic-write helper is used directly
+/// against the workspace's canonical path rather than through
+/// [`WorkspaceRoot`].
+fn write_record(directory: &Path, record: &IdentityRecord) -> Result<()> {
+    let json = serde_json::to_string_pretty(record).map_err(|err| Error::CorruptRecord {
+        record: record.note_id.to_string(),
+        summary: format!("identity record serialization failed: {err}"),
+    })?;
+
+    fs::create_dir_all(directory).map_err(|source| Error::Io {
+        operation: "create identity-map dir",
+        source,
+    })?;
+
+    crate::atomic_write::atomic_write(&record_path(directory, &record.note_id), json.as_bytes())?;
+    Ok(())
 }
 
 /// Loads a single identity record from a JSON file path.

@@ -204,6 +204,19 @@ fn fixture_cases_produce_expected_operations_and_result() {
     }
 }
 
+#[test]
+fn node_anchors_ignore_frontmatter_when_operations_are_applied() {
+    let base = "---\nid: 01ARZ3NDEKTSV4RRFFQ69G5FAV\n---\n# Declared\n\nOriginal content.\n";
+    let incoming = "---\nid: 01ARZ3NDEKTSV4RRFFQ69G5FAV\n---\n# Declared\n\nEdited outside.\n";
+    let base_doc = SourceDocument::parse(base).expect("base parses");
+    let incoming_doc = SourceDocument::parse(incoming).expect("incoming parses");
+
+    let operations = diff_documents(&base_doc, &incoming_doc);
+    let applied = apply_operations(base, &operations).expect("anchors resolve past frontmatter");
+
+    assert_eq!(applied, incoming);
+}
+
 // ---------------------------------------------------------------------------
 // Determinism test
 // ---------------------------------------------------------------------------

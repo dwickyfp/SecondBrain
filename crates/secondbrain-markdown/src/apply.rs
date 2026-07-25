@@ -41,6 +41,7 @@
 //!    **Resolution**: We add an `expected_incoming` field to NeedsReview
 //!    that carries the incoming source. This is the cleanest approach.
 
+use crate::SemanticKind;
 use crate::operation::SemanticOperation;
 use secondbrain_core::{Error, Result};
 
@@ -167,7 +168,13 @@ fn apply_insert(
             let source_str = doc.source();
             let mut found_end = None;
 
-            for (index, child) in doc.root().children.iter().enumerate() {
+            for (index, child) in doc
+                .root()
+                .children
+                .iter()
+                .filter(|child| child.kind != SemanticKind::Frontmatter)
+                .enumerate()
+            {
                 let raw = child.raw(source_str);
                 let hash = secondbrain_core::hash::ContentHash::digest(raw.as_bytes());
                 if hash == anchor_ref.content_hash && index == anchor_ref.path.indices[0] {
@@ -203,7 +210,13 @@ fn apply_delete(source: &str, anchor: &crate::operation::NodeAnchor) -> Result<S
     let source_str = doc.source();
     let mut found_span = None;
 
-    for (index, child) in doc.root().children.iter().enumerate() {
+    for (index, child) in doc
+        .root()
+        .children
+        .iter()
+        .filter(|child| child.kind != SemanticKind::Frontmatter)
+        .enumerate()
+    {
         let raw = child.raw(source_str);
         let hash = secondbrain_core::hash::ContentHash::digest(raw.as_bytes());
         if hash == anchor.content_hash && index == anchor.path.indices[0] {
@@ -254,7 +267,13 @@ fn apply_replace(
     let source_str = doc.source();
     let mut found_span = None;
 
-    for (index, child) in doc.root().children.iter().enumerate() {
+    for (index, child) in doc
+        .root()
+        .children
+        .iter()
+        .filter(|child| child.kind != SemanticKind::Frontmatter)
+        .enumerate()
+    {
         let raw = child.raw(source_str);
         let hash = secondbrain_core::hash::ContentHash::digest(raw.as_bytes());
         if hash == anchor.content_hash && index == anchor.path.indices[0] {
@@ -295,7 +314,13 @@ fn apply_move(
 
     // Find the anchor node by hash.
     let mut found_span = None;
-    for (index, child) in doc.root().children.iter().enumerate() {
+    for (index, child) in doc
+        .root()
+        .children
+        .iter()
+        .filter(|child| child.kind != SemanticKind::Frontmatter)
+        .enumerate()
+    {
         let raw = child.raw(source_str);
         let hash = secondbrain_core::hash::ContentHash::digest(raw.as_bytes());
         if hash == anchor.content_hash && index == anchor.path.indices[0] {
@@ -320,7 +345,12 @@ fn apply_move(
     }
 
     // Simple node move: reorder within root-level children.
-    let children = &doc.root().children;
+    let children: Vec<_> = doc
+        .root()
+        .children
+        .iter()
+        .filter(|child| child.kind != SemanticKind::Frontmatter)
+        .collect();
     let mut nodes: Vec<String> = children
         .iter()
         .map(|c| c.raw(source_str).to_string())
@@ -341,14 +371,14 @@ fn apply_move(
     let separator = if all_list_items { "\n" } else { "\n\n" };
     let result = nodes.join(separator);
 
-    // Ensure trailing newline if the original had one.
-    let trailing = if source.ends_with('\n') && !result.ends_with('\n') {
-        "\n"
-    } else {
-        ""
-    };
-
-    Ok(format!("{result}{trailing}"))
+    let first = children.first().expect("a resolved move has a body node");
+    let last = children.last().expect("a resolved move has a body node");
+    Ok(format!(
+        "{}{}{}",
+        &source[..first.span.start],
+        result,
+        &source[last.span.end..]
+    ))
 }
 
 /// Apply a SetProperty operation: set or update a frontmatter property.
