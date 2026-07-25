@@ -1,7 +1,7 @@
 //! Byte-span types for source-accurate positioning.
 
 /// Half-open byte range `[start, end)` into the original source string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SourceSpan {
     /// Inclusive start byte offset.
     pub start: usize,

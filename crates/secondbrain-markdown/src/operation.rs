@@ -18,7 +18,7 @@ use secondbrain_core::hash::ContentHash;
 /// The path is a sequence of child indices from the root. For example,
 /// `[0]` is the first top-level node, `[1, 0]` is the first child of the
 /// second top-level node.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct StructuralPath {
     /// Child indices from root downward.
     pub indices: Vec<usize>,
@@ -52,7 +52,7 @@ impl StructuralPath {
 /// hash verifies the node's identity (its raw source bytes). Together they
 /// provide unambiguous identification even when the document has duplicate
 /// paragraphs or similar nodes.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct NodeAnchor {
     /// Structural path from root to the node.
     pub path: StructuralPath,
@@ -83,7 +83,7 @@ impl NodeAnchor {
 /// Each variant carries the information needed to apply the operation
 /// deterministically to the base source. Operations are designed so that
 /// [`crate::apply::apply_operations`] can produce the incoming source.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SemanticOperation {
     /// Insert a new node after the anchor node.
     ///

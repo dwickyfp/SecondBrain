@@ -1,0 +1,20 @@
+[package]
+name = "secondbrain-transaction"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+crc32fast.workspace = true
+secondbrain-core = { path = "../secondbrain-core" }
+secondbrain-markdown = { path = "../secondbrain-markdown" }
+serde.workspace = true
+serde_json = "1.0.140"
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json = "1.0.140"

@@ -6,7 +6,7 @@ use crate::source::SourceSpan;
 ///
 /// `Raw` covers any byte range not represented by a supported semantic node,
 /// ensuring every byte of the original source is accounted for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SemanticKind {
     /// Document root container.
     Root,

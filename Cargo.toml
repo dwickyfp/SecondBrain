@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/secondbrain-core", "crates/secondbrain-vault", "crates/secondbrain-markdown"]
+members = ["crates/secondbrain-core", "crates/secondbrain-transaction", "crates/secondbrain-vault", "crates/secondbrain-markdown"]
 resolver = "3"
 
 [workspace.package]
