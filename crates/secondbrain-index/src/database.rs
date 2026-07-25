@@ -4,11 +4,24 @@ use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
 
 const INITIAL_MIGRATION: &str = include_str!("migrations/0001_initial.sql");
+const QUERY_INDEXES_MIGRATION: &str = include_str!("migrations/0002_query_indexes.sql");
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
+pub enum QueryValidationError {
+    #[error("search query contains a disallowed control character")]
+    DisallowedControl,
+    #[error("search query contains an unmatched quote")]
+    UnmatchedQuote,
+}
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("SQLite index operation failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("invalid search query: {0}")]
+    InvalidQuery(QueryValidationError),
+    #[error("index contains invalid note id {value:?}")]
+    InvalidStoredNoteId { value: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -46,6 +59,15 @@ impl IndexDatabase {
         if !applied {
             transaction.execute_batch(INITIAL_MIGRATION)?;
             transaction.execute("INSERT INTO schema_migrations (version) VALUES (1)", [])?;
+        }
+        let applied = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = 2)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !applied {
+            transaction.execute_batch(QUERY_INDEXES_MIGRATION)?;
+            transaction.execute("INSERT INTO schema_migrations (version) VALUES (2)", [])?;
         }
         transaction.commit()?;
         Ok(())

@@ -1,0 +1,298 @@
+use std::fs;
+use std::path::Path;
+
+use secondbrain_index::{
+    Error, IndexConfig, IndexDatabase, QueryValidationError, SearchQuery, rebuild,
+};
+use tempfile::tempdir;
+
+const ALPHA_ID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const BETA_ID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
+const GAMMA_ID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
+
+fn note(id: &str, title: &str, body: &str) -> String {
+    format!("---\nid: {id}\ntitle: {title}\n---\n# {title}\n\n{body}\n")
+}
+
+fn build(root: &Path, notes: &[(&str, &str)]) -> IndexDatabase {
+    for (path, source) in notes {
+        let path = root.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+    rebuild(root, &IndexConfig::default()).unwrap();
+    IndexDatabase::open(root.join(".secondbrain/index.sqlite")).unwrap()
+}
+
+#[test]
+fn term_search_returns_typed_hit() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[(
+            "alpha.md",
+            &note(ALPHA_ID, "Alpha", "A telescope sees nebulae."),
+        )],
+    );
+
+    let hits = database.search(&SearchQuery::new("telescope")).unwrap();
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].note_id.to_string(), ALPHA_ID);
+    assert_eq!(hits[0].path, "alpha.md");
+    assert_eq!(hits[0].title.as_deref(), Some("Alpha"));
+    assert!(hits[0].snippet.contains("telescope"));
+}
+
+#[test]
+fn phrase_and_unicode_search_match_exact_text() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[
+            (
+                "alpha.md",
+                &note(ALPHA_ID, "Alpha", "red giant star and café résumé"),
+            ),
+            ("beta.md", &note(BETA_ID, "Beta", "red bright giant star")),
+        ],
+    );
+
+    let phrase = database.search(&SearchQuery::new("\"red giant\"")).unwrap();
+    let unicode = database.search(&SearchQuery::new("café résumé")).unwrap();
+
+    assert_eq!(
+        phrase
+            .iter()
+            .map(|hit| hit.path.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha.md"]
+    );
+    assert_eq!(
+        unicode
+            .iter()
+            .map(|hit| hit.path.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha.md"]
+    );
+}
+
+#[test]
+fn path_and_tag_filters_narrow_results() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[
+            (
+                "notes/alpha.md",
+                &note(ALPHA_ID, "Alpha", "shared term #rust"),
+            ),
+            ("beta.md", &note(BETA_ID, "Beta", "shared term #other")),
+        ],
+    );
+
+    let by_path = database
+        .search(&SearchQuery::new("shared").with_path("notes/alpha.md"))
+        .unwrap();
+    let by_tag = database
+        .search(&SearchQuery::new("shared").with_tag("rust"))
+        .unwrap();
+
+    assert_eq!(
+        by_path
+            .iter()
+            .map(|hit| hit.path.as_str())
+            .collect::<Vec<_>>(),
+        ["notes/alpha.md"]
+    );
+    assert_eq!(
+        by_tag
+            .iter()
+            .map(|hit| hit.path.as_str())
+            .collect::<Vec<_>>(),
+        ["notes/alpha.md"]
+    );
+}
+
+#[test]
+fn backlinks_and_outgoing_links_are_typed_and_ordered() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[
+            ("z.md", &note(ALPHA_ID, "Zed", "See [[Target]].")),
+            ("a.md", &note(BETA_ID, "Target", "Destination.")),
+            ("b.md", &note(GAMMA_ID, "Bee", "Also [[Target]].")),
+        ],
+    );
+    let target = BETA_ID.parse().unwrap();
+    let source = ALPHA_ID.parse().unwrap();
+
+    let backlinks = database.backlinks(target).unwrap();
+    let outgoing = database.outgoing_links(source).unwrap();
+
+    assert_eq!(
+        backlinks
+            .iter()
+            .map(|hit| hit.path.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("b.md"), Some("z.md")]
+    );
+    assert_eq!(
+        outgoing
+            .iter()
+            .map(|hit| hit.path.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("a.md")]
+    );
+    assert_eq!(outgoing[0].note_id, Some(target));
+}
+
+#[test]
+fn outgoing_links_order_resolved_by_path_then_unresolved_by_target() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[
+            (
+                "source.md",
+                &note(
+                    ALPHA_ID,
+                    "Source",
+                    "[[Missing Z]] [[A Target]] [[Missing A]] [[Z Target]]",
+                ),
+            ),
+            ("z.md", &note(BETA_ID, "A Target", "Destination.")),
+            ("a.md", &note(GAMMA_ID, "Z Target", "Destination.")),
+        ],
+    );
+
+    let outgoing = database.outgoing_links(ALPHA_ID.parse().unwrap()).unwrap();
+
+    assert_eq!(
+        outgoing
+            .iter()
+            .map(|hit| (hit.target.as_str(), hit.note_id, hit.path.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("Z Target", Some(GAMMA_ID.parse().unwrap()), Some("a.md")),
+            ("A Target", Some(BETA_ID.parse().unwrap()), Some("z.md")),
+            ("Missing A", None, None),
+            ("Missing Z", None, None),
+        ]
+    );
+}
+
+#[test]
+fn broken_links_and_orphans_are_reported_in_stable_order() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[
+            ("z.md", &note(ALPHA_ID, "Zed", "[[Missing Z]]")),
+            ("a.md", &note(BETA_ID, "Alpha", "No links.")),
+            ("b.md", &note(GAMMA_ID, "Bee", "[[Missing A]]")),
+        ],
+    );
+
+    let broken = database.broken_links().unwrap();
+    let orphans = database.orphans().unwrap();
+
+    assert_eq!(
+        broken
+            .iter()
+            .map(|link| link.source_path.as_str())
+            .collect::<Vec<_>>(),
+        ["b.md", "z.md"]
+    );
+    assert_eq!(
+        orphans
+            .iter()
+            .map(|note| note.path.as_str())
+            .collect::<Vec<_>>(),
+        ["a.md", "b.md", "z.md"]
+    );
+}
+
+#[test]
+fn snippets_preserve_printable_unicode_and_escape_terminal_controls() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[(
+            "alpha.md",
+            &note(
+                ALPHA_ID,
+                "Alpha",
+                "findme café \u{1b}[31m red\nnext\tcolumn",
+            ),
+        )],
+    );
+
+    let hits = database.search(&SearchQuery::new("findme")).unwrap();
+
+    assert!(hits[0].snippet.contains("café"));
+    assert!(!hits[0].snippet.contains('\u{1b}'));
+    assert!(!hits[0].snippet.contains('\n'));
+    assert!(hits[0].snippet.contains("\\u{1b}") || hits[0].snippet.contains("\\x1b"));
+}
+
+#[test]
+fn equal_rank_searches_tie_break_by_path_then_note_id() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[
+            ("z.md", &note(ALPHA_ID, "Same", "equal token")),
+            ("a.md", &note(BETA_ID, "Same", "equal token")),
+        ],
+    );
+
+    let hits = database.search(&SearchQuery::new("equal")).unwrap();
+
+    assert_eq!(
+        hits.iter().map(|hit| hit.path.as_str()).collect::<Vec<_>>(),
+        ["a.md", "z.md"]
+    );
+}
+
+#[test]
+fn invalid_search_text_returns_typed_validation_errors() {
+    let dir = tempdir().unwrap();
+    let database = build(dir.path(), &[]);
+    for (text, expected) in [
+        ("nul\0byte", QueryValidationError::DisallowedControl),
+        ("\"unterminated", QueryValidationError::UnmatchedQuote),
+        ("\u{1b}\u{7}", QueryValidationError::DisallowedControl),
+    ] {
+        let error = database.search(&SearchQuery::new(text)).unwrap_err();
+        assert!(matches!(error, Error::InvalidQuery(actual) if actual == expected));
+    }
+}
+
+#[test]
+fn corrupt_stored_note_id_has_contextual_error() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[("alpha.md", &note(ALPHA_ID, "Alpha", "needle"))],
+    );
+    database
+        .connection()
+        .execute("PRAGMA foreign_keys=OFF", [])
+        .unwrap();
+    database
+        .connection()
+        .execute("UPDATE notes SET note_id='bad-id'", [])
+        .unwrap();
+    database
+        .connection()
+        .execute("UPDATE paths SET note_id='bad-id'", [])
+        .unwrap();
+    database
+        .connection()
+        .execute("UPDATE notes_fts SET note_id='bad-id'", [])
+        .unwrap();
+    let error = database.search(&SearchQuery::new("needle")).unwrap_err();
+    assert!(matches!(error, Error::InvalidStoredNoteId { value } if value == "bad-id"));
+}

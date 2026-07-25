@@ -42,11 +42,55 @@ fn migration_is_idempotent_and_records_schema_version() {
     let database = IndexDatabase::open(path).unwrap();
     let version: i64 = database
         .connection()
-        .query_row("SELECT version FROM schema_migrations", [], |row| {
+        .query_row("SELECT max(version) FROM schema_migrations", [], |row| {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(version, 1);
+    assert_eq!(version, 2);
+}
+
+#[test]
+fn query_indexes_exist_and_are_selected_by_sqlite() {
+    let temp = tempdir().unwrap();
+    let mut database = IndexDatabase::open(temp.path().join("index.sqlite3")).unwrap();
+    database.migrate().unwrap();
+    let connection = database.connection();
+    for (sql, index) in [
+        ("SELECT * FROM links WHERE label='x'", "links_label_idx"),
+        ("SELECT * FROM links WHERE note_id='x'", "links_note_id_idx"),
+        (
+            "SELECT 1 FROM tags WHERE note_id='x' AND tag='rust'",
+            "sqlite_autoindex_tags_1",
+        ),
+    ] {
+        let detail: String = connection
+            .query_row(&format!("EXPLAIN QUERY PLAN {sql}"), [], |row| row.get(3))
+            .unwrap();
+        assert!(detail.contains(index), "expected {index} in plan: {detail}");
+    }
+    let orphan_plan = connection.prepare("EXPLAIN QUERY PLAN SELECT n.note_id FROM notes n WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.note_id=n.note_id AND l.label IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM links l WHERE l.label=n.note_id)").unwrap().query_map([], |row| row.get::<_, String>(3)).unwrap().collect::<Result<Vec<_>, _>>().unwrap().join("\n");
+    assert!(orphan_plan.contains("links_note_id_idx"), "{orphan_plan}");
+    assert!(orphan_plan.contains("links_label_idx"), "{orphan_plan}");
+}
+
+#[test]
+fn forward_migration_upgrades_an_existing_version_one_database() {
+    let temp = tempdir().unwrap();
+    let mut database = IndexDatabase::open(temp.path().join("index.sqlite3")).unwrap();
+    database
+        .connection()
+        .execute_batch(include_str!("../src/migrations/0001_initial.sql"))
+        .unwrap();
+    database.connection().execute_batch("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO schema_migrations(version) VALUES(1);").unwrap();
+    database.migrate().unwrap();
+    database.migrate().unwrap();
+    let version: i64 = database
+        .connection()
+        .query_row("SELECT max(version) FROM schema_migrations", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(version, 2);
 }
 
 #[test]

@@ -397,6 +397,9 @@ fn line_at(source: &str, offset: usize) -> i64 {
 fn database_error(error: crate::Error) -> IndexError {
     match error {
         crate::Error::Sqlite(error) => IndexError::Sqlite(error),
+        crate::Error::InvalidQuery(_) | crate::Error::InvalidStoredNoteId { .. } => {
+            IndexError::Sqlite(rusqlite::Error::InvalidQuery)
+        }
     }
 }
 fn check_database(connection: &Connection) -> Result<(), IndexError> {
