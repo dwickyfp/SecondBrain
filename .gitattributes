@@ -1,5 +1,6 @@
 # Markdown fixtures are LF unless a fixture intentionally exercises CRLF.
 fixtures/markdown/**/*.md text eol=lf
+fixtures/external-edits/**/*.md text eol=lf
 
 # Preserve intentional CRLF fixture blobs byte-for-byte.
 fixtures/markdown/source-preservation/crlf.md binary !eol

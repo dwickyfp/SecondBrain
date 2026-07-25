@@ -13,6 +13,7 @@ use secondbrain_vault::WorkspaceRoot;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::base_snapshot::{BaseSnapshotStore, SnapshotError};
 use crate::failpoint;
 use crate::oplog::{LocalMutationLog, OplogError};
 use crate::record::{FORMAT_VERSION_1, LocalOperationRecord, RecordEncodeError};
@@ -52,6 +53,13 @@ pub enum TransactionError {
     },
     #[error("NeedsReview operations cannot be committed automatically")]
     NeedsReview,
+    #[error("adopted post-state {expected} is not the content on disk {actual}")]
+    PostStateMismatch {
+        expected: ContentHash,
+        actual: ContentHash,
+    },
+    #[error("converged base failed: {0}")]
+    Snapshot(#[from] SnapshotError),
     #[error("note version overflow")]
     VersionOverflow,
     #[error("operation log failed: {0}")]
@@ -113,6 +121,108 @@ impl TransactionEngine {
         let mut state = TransactionState::Prepared;
         self.persist_state(&request, state, version, false)?;
 
+        failpoint::hit("before_append")?;
+        self.journal_operations(&request)?;
+        failpoint::hit("after_append_before_state")?;
+
+        state.transition_to(TransactionState::OperationsDurable)?;
+        self.persist_state(&request, state, version, false)?;
+        failpoint::hit("after_operations_durable")?;
+        state.transition_to(TransactionState::Materializing)?;
+        self.persist_state(&request, state, version, false)?;
+        failpoint::hit("during_temp_markdown_write")?;
+        self.workspace
+            .atomic_write(&request.path, materialized.as_bytes())?;
+        failpoint::hit("after_rename_before_commit")?;
+        state.transition_to(TransactionState::Committed)?;
+        self.persist_state(&request, state, version, false)?;
+        failpoint::hit("after_commit_before_index")?;
+        self.persist_state(&request, state, version, true)?;
+        self.record_converged_base(&request, version, &materialized)?;
+
+        Ok(CommitOutcome {
+            changed: true,
+            version,
+        })
+    }
+
+    /// Journals an external edit whose result is already materialized on disk.
+    ///
+    /// An external editor rewrites the whole file before the workspace ever
+    /// sees the change, so the operations that describe such an edit can never
+    /// be applied to the file again — their anchors describe the base the
+    /// editor started from, and that base is gone. This entry point therefore
+    /// shares [`Self::commit`]'s journal, marker format and converged base, and
+    /// skips only the Markdown write, after proving that the file already holds
+    /// the operations' post-state. That is the rule recovery already applies
+    /// when it finds Markdown matching a transaction's post-state: mark the
+    /// transaction committed idempotently rather than rewriting the file.
+    ///
+    /// `base` is the converged source the operations were derived from, and
+    /// `request.expected_hash` is the on-disk state the caller observed.
+    ///
+    /// Unlike [`Self::commit`], no `PREPARED` or `MATERIALIZING` marker is
+    /// written: there is no materialization to resume, and a marker for one
+    /// would make recovery replay operations against a file that already
+    /// contains them. A crash before the single `COMMITTED` marker therefore
+    /// leaves journal records that recovery ignores, with the file already
+    /// holding the edit.
+    ///
+    /// The returned outcome reports `changed: false` because no Markdown was
+    /// written; `version` is the version the journaled edit converged at.
+    pub fn adopt_external(
+        &self,
+        request: TransactionRequest,
+        base: &str,
+    ) -> Result<CommitOutcome, TransactionError> {
+        let note_path = self.workspace.resolve(&request.path)?;
+        let source = fs::read_to_string(note_path)?;
+        let actual_hash = ContentHash::digest(source.as_bytes());
+        if actual_hash != request.expected_hash {
+            return Err(TransactionError::StaleHash {
+                expected: request.expected_hash,
+                actual: actual_hash,
+            });
+        }
+        if request
+            .operations
+            .iter()
+            .any(|operation| matches!(operation, SemanticOperation::NeedsReview { .. }))
+        {
+            return Err(TransactionError::NeedsReview);
+        }
+        let post_state = apply_operations(base, &request.operations)?;
+        if post_state != source {
+            return Err(TransactionError::PostStateMismatch {
+                expected: ContentHash::digest(post_state.as_bytes()),
+                actual: actual_hash,
+            });
+        }
+        if request.operations.is_empty() {
+            return Ok(CommitOutcome {
+                changed: false,
+                version: request.expected_version,
+            });
+        }
+        let version = request
+            .expected_version
+            .checked_increment()
+            .ok_or(TransactionError::VersionOverflow)?;
+
+        self.journal_operations(&request)?;
+        self.persist_state(&request, TransactionState::Committed, version, false)?;
+        self.persist_state(&request, TransactionState::Committed, version, true)?;
+        self.record_converged_base(&request, version, &source)?;
+
+        Ok(CommitOutcome {
+            changed: false,
+            version,
+        })
+    }
+
+    /// Appends every operation of one transaction to the note's oplog,
+    /// continuing the sequence and hash chain of the records already there.
+    fn journal_operations(&self, request: &TransactionRequest) -> Result<(), TransactionError> {
         let mut log = LocalMutationLog::open(self.workspace.canonical_path(), request.note_id)?;
         let replay = log.replay()?;
         let mut sequence = replay
@@ -124,7 +234,6 @@ impl TransactionEngine {
             .last()
             .map(|record| record.encode().map(ContentHash::digest))
             .transpose()?;
-        failpoint::hit("before_append")?;
         for operation in &request.operations {
             let record = LocalOperationRecord {
                 format_version: FORMAT_VERSION_1,
@@ -142,26 +251,22 @@ impl TransactionEngine {
             previous_record_hash = Some(ContentHash::digest(record.encode()?));
             sequence += 1;
         }
-        failpoint::hit("after_append_before_state")?;
+        Ok(())
+    }
 
-        state.transition_to(TransactionState::OperationsDurable)?;
-        self.persist_state(&request, state, version, false)?;
-        failpoint::hit("after_operations_durable")?;
-        state.transition_to(TransactionState::Materializing)?;
-        self.persist_state(&request, state, version, false)?;
-        failpoint::hit("during_temp_markdown_write")?;
-        self.workspace
-            .atomic_write(&request.path, materialized.as_bytes())?;
-        failpoint::hit("after_rename_before_commit")?;
-        state.transition_to(TransactionState::Committed)?;
-        self.persist_state(&request, state, version, false)?;
-        failpoint::hit("after_commit_before_index")?;
-        self.persist_state(&request, state, version, true)?;
-
-        Ok(CommitOutcome {
-            changed: true,
+    fn record_converged_base(
+        &self,
+        request: &TransactionRequest,
+        version: NoteVersion,
+        source: &str,
+    ) -> Result<(), TransactionError> {
+        BaseSnapshotStore::new(&self.workspace).save(
+            request.note_id,
+            &request.path,
             version,
-        })
+            source,
+        )?;
+        Ok(())
     }
 
     fn persist_state(
