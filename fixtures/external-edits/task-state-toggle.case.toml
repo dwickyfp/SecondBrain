@@ -1,0 +1,19 @@
+# Task-state toggle: a GFM task list item changes from [ ] to [x].
+# Expected: one ReplaceNode operation.
+
+[case]
+name = "task_state_toggle"
+description = "A task list item toggles from unchecked to checked"
+
+[case.base]
+source = "- [ ] Buy milk\n- [x] Walk dog\n"
+
+[case.incoming]
+source = "- [x] Buy milk\n- [x] Walk dog\n"
+
+[case.expected_operations]
+count = 1
+kinds = ["ReplaceNode"]
+
+[case.expected_result]
+source = "- [x] Buy milk\n- [x] Walk dog\n"

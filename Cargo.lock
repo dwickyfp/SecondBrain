@@ -503,6 +503,7 @@ dependencies = [
  "secondbrain-core",
  "serde",
  "serde_yaml",
+ "toml",
 ]
 
 [[package]]

@@ -1,0 +1,20 @@
+# Independent property changes: frontmatter properties change
+# without body changes.
+# Expected: SetProperty operation(s) for the changed properties.
+
+[case]
+name = "independent_property_changes"
+description = "Frontmatter properties change without body changes"
+
+[case.base]
+source = "---\ntitle: Old\ntags: [a, b]\n---\n\nBody.\n"
+
+[case.incoming]
+source = "---\ntitle: New\ntags: [a, b]\n---\n\nBody.\n"
+
+[case.expected_operations]
+count = 1
+kinds = ["SetProperty"]
+
+[case.expected_result]
+source = "---\ntitle: New\ntags: [a, b]\n---\n\nBody.\n"

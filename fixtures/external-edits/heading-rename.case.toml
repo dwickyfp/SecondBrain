@@ -1,0 +1,19 @@
+# Heading rename: heading text changes, level stays the same.
+# Expected: one ReplaceNode operation.
+
+[case]
+name = "heading_rename"
+description = "A heading's text is renamed without changing level"
+
+[case.base]
+source = "# Old Title\n\nSome content.\n"
+
+[case.incoming]
+source = "# New Title\n\nSome content.\n"
+
+[case.expected_operations]
+count = 1
+kinds = ["ReplaceNode"]
+
+[case.expected_result]
+source = "# New Title\n\nSome content.\n"

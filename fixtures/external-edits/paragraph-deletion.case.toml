@@ -1,0 +1,19 @@
+# Paragraph deletion: a paragraph is removed from the document.
+# Expected: one DeleteNode operation.
+
+[case]
+name = "paragraph_deletion"
+description = "A paragraph is removed from the document"
+
+[case.base]
+source = "# Notes\n\nFirst paragraph.\n\nSecond paragraph.\n"
+
+[case.incoming]
+source = "# Notes\n\nFirst paragraph.\n"
+
+[case.expected_operations]
+count = 1
+kinds = ["DeleteNode"]
+
+[case.expected_result]
+source = "# Notes\n\nFirst paragraph.\n"

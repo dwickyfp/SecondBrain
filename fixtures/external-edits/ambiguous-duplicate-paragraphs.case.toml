@@ -1,0 +1,25 @@
+# Ambiguous duplicate paragraphs: two identical paragraphs exist and
+# one of them is modified. The diff cannot unambiguously determine which
+# paragraph changed, so it must emit NeedsReview.
+# Expected: at least one NeedsReview operation.
+
+[case]
+name = "ambiguous_duplicate_paragraphs"
+description = "Two identical paragraphs exist and one changes — diff must emit NeedsReview"
+
+[case.base]
+source = "Duplicate.\n\nSome middle.\n\nDuplicate.\n"
+
+[case.incoming]
+source = "Duplicate.\n\nSome middle.\n\nChanged.\n"
+
+[case.expected_operations]
+# We expect at least one NeedsReview because the diff cannot tell which
+# "Duplicate." paragraph is the unchanged one.
+min_count = 1
+kinds = ["NeedsReview"]
+
+[case.expected_result]
+# When NeedsReview is present, the result is the incoming source itself
+# (no destructive automatic application).
+source = "Duplicate.\n\nSome middle.\n\nChanged.\n"

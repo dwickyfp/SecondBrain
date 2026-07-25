@@ -1,0 +1,20 @@
+# List item move: two list items swap positions.
+# Expected: one MoveNode operation (identity is unambiguous because
+# item texts are unique).
+
+[case]
+name = "list_item_move"
+description = "Two list items swap positions with unique text"
+
+[case.base]
+source = "- Alpha\n- Beta\n- Gamma\n"
+
+[case.incoming]
+source = "- Gamma\n- Beta\n- Alpha\n"
+
+[case.expected_operations]
+count = 1
+kinds = ["MoveNode"]
+
+[case.expected_result]
+source = "- Gamma\n- Beta\n- Alpha\n"

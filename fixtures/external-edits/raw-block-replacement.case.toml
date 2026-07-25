@@ -1,0 +1,19 @@
+# Raw block replacement: a code block's content is replaced.
+# Expected: one ReplaceNode operation.
+
+[case]
+name = "raw_block_replacement"
+description = "A code block's content is replaced entirely"
+
+[case.base]
+source = "# Code\n\n```rust\nfn old() {}\n```\n"
+
+[case.incoming]
+source = "# Code\n\n```rust\nfn new() {}\n```\n"
+
+[case.expected_operations]
+count = 1
+kinds = ["ReplaceNode"]
+
+[case.expected_result]
+source = "# Code\n\n```rust\nfn new() {}\n```\n"

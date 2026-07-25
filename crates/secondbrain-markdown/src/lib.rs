@@ -6,9 +6,12 @@
 //! slices for unchanged regions. The original source is kept as an [`Arc<str>`]
 //! for zero-copy slicing.
 
+pub mod apply;
 pub mod ast;
+pub mod diff;
 pub mod extract;
 pub mod frontmatter;
+pub mod operation;
 pub mod parse;
 pub mod source;
 

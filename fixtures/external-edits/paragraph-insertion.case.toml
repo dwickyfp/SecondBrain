@@ -1,0 +1,19 @@
+# Paragraph insertion: a new paragraph is added between existing ones.
+# Expected: one InsertNode operation.
+
+[case]
+name = "paragraph_insertion"
+description = "A new paragraph is inserted between existing ones"
+
+[case.base]
+source = "# Notes\n\nFirst paragraph.\n"
+
+[case.incoming]
+source = "# Notes\n\nFirst paragraph.\n\nSecond paragraph.\n"
+
+[case.expected_operations]
+count = 1
+kinds = ["InsertNode"]
+
+[case.expected_result]
+source = "# Notes\n\nFirst paragraph.\n\nSecond paragraph.\n"

@@ -1,0 +1,19 @@
+# Paragraph text update: a single paragraph's text is changed.
+# Expected: one ReplaceNode operation, applied result equals incoming.
+
+[case]
+name = "paragraph_text_update"
+description = "A single paragraph's text is updated"
+
+[case.base]
+source = "# Notes\n\nHello world.\n\nGoodbye.\n"
+
+[case.incoming]
+source = "# Notes\n\nHello universe.\n\nGoodbye.\n"
+
+[case.expected_operations]
+count = 1
+kinds = ["ReplaceNode"]
+
+[case.expected_result]
+source = "# Notes\n\nHello universe.\n\nGoodbye.\n"
