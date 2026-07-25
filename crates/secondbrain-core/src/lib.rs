@@ -10,9 +10,12 @@
 //! ```
 
 pub mod actor;
+pub mod error;
 pub mod hash;
 pub mod id;
 pub mod path;
+
+pub use error::{Error, Result};
 
 #[cfg(test)]
 mod tests {
