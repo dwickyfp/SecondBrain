@@ -7,9 +7,11 @@
 #![forbid(unsafe_code)]
 
 pub mod atomic_write;
+pub mod identity_map;
 pub mod manifest;
 pub mod root;
 
+pub use identity_map::{FingerprintRecord, IdentityMap, IdentityRecord, RecoveryOutcome};
 pub use manifest::{
     SUPPORTED_FORMAT_VERSION, WorkspaceManifest, initialize_workspace, load_manifest,
 };

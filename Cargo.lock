@@ -512,7 +512,9 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "secondbrain-core",
+ "secondbrain-markdown",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
  "ulid",
