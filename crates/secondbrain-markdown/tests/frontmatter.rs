@@ -249,22 +249,15 @@ fn inserting_id_without_frontmatter_prepends_block() {
         "patched source should contain the id"
     );
 
-    // The original body (everything after the prepended block) must be preserved.
-    // The body is the original source, which should appear after the frontmatter block.
-    let body_start = patch
+    // The original body must be the exact byte-identical suffix regardless of
+    // whether the fixture uses LF or CRLF line endings.
+    let prepended_frontmatter = patch
         .source
-        .find("---\n")
-        .and_then(|start| {
-            patch.source[start + 4..]
-                .find("---\n")
-                .map(|end| start + 4 + end + 4)
-        })
-        .expect("should find end of frontmatter block");
-    let patched_body = &patch.source[body_start..];
-    assert_eq!(
-        patched_body.as_bytes(),
-        original_body.as_bytes(),
-        "body must be byte-identical when prepending frontmatter"
+        .strip_suffix(original_body)
+        .expect("patched source must preserve the complete original body as its suffix");
+    assert!(
+        prepended_frontmatter.ends_with("---\n") || prepended_frontmatter.ends_with("---\r\n"),
+        "prepended frontmatter must end with a closing delimiter"
     );
 }
 
