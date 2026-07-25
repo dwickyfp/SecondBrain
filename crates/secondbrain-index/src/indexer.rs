@@ -37,6 +37,10 @@ pub enum IndexError {
     },
     #[error("malformed note {path}: {message}")]
     MalformedNote { path: String, message: String },
+    #[error("workspace path is not portable UTF-8: {path}")]
+    NonUtf8Path { path: PathBuf },
+    #[error("portable path collision between {first} and {second}")]
+    PathCollision { first: String, second: String },
     #[error("duplicate note ID {note_id} in {first} and {second}")]
     DuplicateId {
         note_id: NoteId,
@@ -90,6 +94,7 @@ pub fn note_paths(
     let mut files = Vec::new();
     scan(root, root, config, &mut files, &mut skipped)?;
     files.sort();
+    reject_path_collisions(&files)?;
     files
         .into_iter()
         .map(|(relative, _)| {
@@ -191,10 +196,10 @@ fn scan(
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let path = entry.path();
-        let relative = path
-            .strip_prefix(root)
-            .expect("scanned path is below root")
-            .to_string_lossy()
+        let relative_path = path.strip_prefix(root).expect("scanned path is below root");
+        let relative = relative_path
+            .to_str()
+            .ok_or_else(|| IndexError::NonUtf8Path { path: path.clone() })?
             .replace('\\', "/");
         let internal = relative == ".git" || relative == ".secondbrain";
         let excluded = config
@@ -207,6 +212,22 @@ fn scan(
             scan(root, &path, config, files, skipped)?;
         } else if is_markdown(&path) {
             files.push((relative, path));
+        }
+    }
+    Ok(())
+}
+
+fn reject_path_collisions(files: &[(String, PathBuf)]) -> Result<(), IndexError> {
+    let mut portable = BTreeMap::new();
+    for (relative, _) in files {
+        let key = relative.to_lowercase();
+        if let Some(first) = portable.insert(key, relative.clone())
+            && first != *relative
+        {
+            return Err(IndexError::PathCollision {
+                first,
+                second: relative.clone(),
+            });
         }
     }
     Ok(())

@@ -597,6 +597,32 @@ fn a_caller_that_cannot_see_the_workspace_still_reads_an_exact_match_as_a_copy()
 }
 
 #[test]
+fn a_scan_does_not_call_a_structurally_similar_new_file_a_rename() {
+    let (_temp, root) = fresh_workspace();
+    let original = "# Note 1\n\nContent 1.\n";
+    let incoming = "# Note 2\n\nContent 2.\n";
+    let (original_hash, original_fp) = fingerprint_of(original);
+    let (incoming_hash, incoming_fp) = fingerprint_of(incoming);
+    assert_eq!(original_fp, incoming_fp, "fixture requires equal structure");
+    let original_path = WorkspacePath::new("Notes/one.md").unwrap();
+    let incoming_path = WorkspacePath::new("Notes/two.md").unwrap();
+    let mut map = IdentityMap::open(&root).unwrap();
+    map.register(&original_path, original_hash, original_fp)
+        .unwrap();
+
+    let outcome = map
+        .resolve_in_scan(
+            &incoming_path,
+            incoming_hash,
+            incoming_fp,
+            &scan(&["Notes/one.md", "Notes/two.md"]),
+        )
+        .unwrap();
+
+    assert_eq!(outcome, RecoveryOutcome::New);
+}
+
+#[test]
 fn a_declared_identity_is_registered_without_replacing_converged_evidence() {
     let (_temp, root) = fresh_workspace();
     let original = "# Declared\n\nOriginal content.\n";

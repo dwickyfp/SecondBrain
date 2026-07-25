@@ -504,14 +504,16 @@ impl IdentityMap {
         // at a different path, this is likely a rename where the body changed.
         // Resolve to that record's ID. If two or more records match with equal
         // evidence, manual review is needed.
-        if fingerprint_only_matches.len() == 1 {
-            return Ok(RecoveryOutcome::Resolved(
-                fingerprint_only_matches[0].note_id,
-            ));
+        let fingerprint_candidates: Vec<&IdentityRecord> = fingerprint_only_matches
+            .into_iter()
+            .filter(|record| present.is_none_or(|paths| !paths.contains(&record.current_path)))
+            .collect();
+        if fingerprint_candidates.len() == 1 {
+            return Ok(RecoveryOutcome::Resolved(fingerprint_candidates[0].note_id));
         }
-        if fingerprint_only_matches.len() > 1 {
+        if fingerprint_candidates.len() > 1 {
             let candidates: Vec<NoteId> =
-                fingerprint_only_matches.iter().map(|r| r.note_id).collect();
+                fingerprint_candidates.iter().map(|r| r.note_id).collect();
             return Ok(RecoveryOutcome::NeedsReview { candidates });
         }
 

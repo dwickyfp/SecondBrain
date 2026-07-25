@@ -1,0 +1,2703 @@
+{
+  "schema": "secondbrain-crdt-benchmark-v1",
+  "generated_at": "2026-07-25T19:59:47.726041+00:00",
+  "repetitions": 3,
+  "base_seed": 764230027,
+  "host": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.12.8"
+  },
+  "cases": [
+    {
+      "name": "text-1k-r2",
+      "workload": "text",
+      "operations": 1000,
+      "replicas": 2
+    },
+    {
+      "name": "text-10k-r2",
+      "workload": "text",
+      "operations": 10000,
+      "replicas": 2
+    },
+    {
+      "name": "text-100k-r2",
+      "workload": "text",
+      "operations": 100000,
+      "replicas": 2
+    },
+    {
+      "name": "list-move-10k-r10",
+      "workload": "list_move",
+      "operations": 10000,
+      "replicas": 10
+    },
+    {
+      "name": "properties-10k-r100",
+      "workload": "properties",
+      "operations": 10000,
+      "replicas": 100
+    },
+    {
+      "name": "offline-1k-r2",
+      "workload": "offline_merge",
+      "operations": 1000,
+      "replicas": 2
+    },
+    {
+      "name": "offline-10k-r10",
+      "workload": "offline_merge",
+      "operations": 10000,
+      "replicas": 10
+    },
+    {
+      "name": "offline-100k-r100",
+      "workload": "offline_merge",
+      "operations": 100000,
+      "replicas": 100
+    },
+    {
+      "name": "snapshot-100k-r2",
+      "workload": "snapshot_restore",
+      "operations": 100000,
+      "replicas": 2
+    },
+    {
+      "name": "incremental-10k-r2",
+      "workload": "incremental_update",
+      "operations": 10000,
+      "replicas": 2
+    },
+    {
+      "name": "compacted-100k-r2",
+      "workload": "compacted_restore",
+      "operations": 100000,
+      "replicas": 2
+    }
+  ],
+  "runs": [
+    {
+      "candidate": "loro",
+      "case": "text-1k-r2",
+      "workload": "text",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230027,
+      "repetition": 0,
+      "wall_time_ns": 436260583,
+      "peak_rss_bytes": 32768,
+      "stdout_bytes": 1581,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "text-1k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "text-1k-r2",
+      "workload": "text",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230027,
+      "repetition": 1,
+      "wall_time_ns": 4032958,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1581,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "text-1k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "text-1k-r2",
+      "workload": "text",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230027,
+      "repetition": 2,
+      "wall_time_ns": 4480000,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1581,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "text-1k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "text-1k-r2",
+      "workload": "text",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230027,
+      "repetition": 0,
+      "wall_time_ns": 403745250,
+      "peak_rss_bytes": 131072,
+      "stdout_bytes": 1582,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "text-1k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "text-1k-r2",
+      "workload": "text",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230027,
+      "repetition": 1,
+      "wall_time_ns": 3970541,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1582,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "text-1k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "text-1k-r2",
+      "workload": "text",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230027,
+      "repetition": 2,
+      "wall_time_ns": 3956708,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1582,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "text-1k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "text-10k-r2",
+      "workload": "text",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230028,
+      "repetition": 0,
+      "wall_time_ns": 4937291,
+      "peak_rss_bytes": 2949120,
+      "stdout_bytes": 10584,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "text-10k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "text-10k-r2",
+      "workload": "text",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230028,
+      "repetition": 1,
+      "wall_time_ns": 4596291,
+      "peak_rss_bytes": 2949120,
+      "stdout_bytes": 10584,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "text-10k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "text-10k-r2",
+      "workload": "text",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230028,
+      "repetition": 2,
+      "wall_time_ns": 4981583,
+      "peak_rss_bytes": 2949120,
+      "stdout_bytes": 10584,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "text-10k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "text-10k-r2",
+      "workload": "text",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230028,
+      "repetition": 0,
+      "wall_time_ns": 34268291,
+      "peak_rss_bytes": 2342912,
+      "stdout_bytes": 10585,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "text-10k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "text-10k-r2",
+      "workload": "text",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230028,
+      "repetition": 1,
+      "wall_time_ns": 34929583,
+      "peak_rss_bytes": 2326528,
+      "stdout_bytes": 10585,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "text-10k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "text-10k-r2",
+      "workload": "text",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230028,
+      "repetition": 2,
+      "wall_time_ns": 34417875,
+      "peak_rss_bytes": 2326528,
+      "stdout_bytes": 10585,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "text-10k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "text-100k-r2",
+      "workload": "text",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230029,
+      "repetition": 0,
+      "wall_time_ns": 22081459,
+      "peak_rss_bytes": 3244032,
+      "stdout_bytes": 100587,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "text-100k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "text-100k-r2",
+      "workload": "text",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230029,
+      "repetition": 1,
+      "wall_time_ns": 22542708,
+      "peak_rss_bytes": 3244032,
+      "stdout_bytes": 100587,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "text-100k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "text-100k-r2",
+      "workload": "text",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230029,
+      "repetition": 2,
+      "wall_time_ns": 22400166,
+      "peak_rss_bytes": 3244032,
+      "stdout_bytes": 100587,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "text-100k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "text-100k-r2",
+      "workload": "text",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230029,
+      "repetition": 0,
+      "wall_time_ns": 2548257959,
+      "peak_rss_bytes": 2490368,
+      "stdout_bytes": 100588,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "text-100k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "text-100k-r2",
+      "workload": "text",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230029,
+      "repetition": 1,
+      "wall_time_ns": 2559420416,
+      "peak_rss_bytes": 2523136,
+      "stdout_bytes": 100588,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "text-100k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "text-100k-r2",
+      "workload": "text",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230029,
+      "repetition": 2,
+      "wall_time_ns": 2546059833,
+      "peak_rss_bytes": 2523136,
+      "stdout_bytes": 100588,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "text-100k-r2",
+        "status": "passed",
+        "commands_executed": 5,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "list-move-10k-r10",
+      "workload": "list_move",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230030,
+      "repetition": 0,
+      "wall_time_ns": 29781458,
+      "peak_rss_bytes": 65536000,
+      "stdout_bytes": 3669,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "list-move-10k-r10",
+        "status": "passed",
+        "commands_executed": 13,
+        "state_hashes": {
+          "final": "9077cd825c26096c7b9759bf3639a63a4a3421533cdf9c8967283fd3f60a8492"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 3118,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "list-move-10k-r10",
+      "workload": "list_move",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230030,
+      "repetition": 1,
+      "wall_time_ns": 29467166,
+      "peak_rss_bytes": 65536000,
+      "stdout_bytes": 3669,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "list-move-10k-r10",
+        "status": "passed",
+        "commands_executed": 13,
+        "state_hashes": {
+          "final": "9077cd825c26096c7b9759bf3639a63a4a3421533cdf9c8967283fd3f60a8492"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 3118,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "list-move-10k-r10",
+      "workload": "list_move",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230030,
+      "repetition": 2,
+      "wall_time_ns": 29990125,
+      "peak_rss_bytes": 65568768,
+      "stdout_bytes": 3669,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "list-move-10k-r10",
+        "status": "passed",
+        "commands_executed": 13,
+        "state_hashes": {
+          "final": "9077cd825c26096c7b9759bf3639a63a4a3421533cdf9c8967283fd3f60a8492"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 3118,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "list-move-10k-r10",
+      "workload": "list_move",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230030,
+      "repetition": 0,
+      "wall_time_ns": 3540750,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 694,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "list-move-10k-r10",
+        "status": "unsupported",
+        "commands_executed": 13,
+        "state_hashes": {
+          "final": "e111c780ee79e763cce51f027d46ad958e7ff22b22fd6903caa388ffd276be8a"
+        },
+        "metrics": {
+          "operation_count": 0,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 39,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [
+          {
+            "command_index": 10,
+            "feature": "identity_preserving_move",
+            "reason": "Yrs 0.27.3 has no native Array move"
+          }
+        ],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "list-move-10k-r10",
+      "workload": "list_move",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230030,
+      "repetition": 1,
+      "wall_time_ns": 3249792,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 694,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "list-move-10k-r10",
+        "status": "unsupported",
+        "commands_executed": 13,
+        "state_hashes": {
+          "final": "e111c780ee79e763cce51f027d46ad958e7ff22b22fd6903caa388ffd276be8a"
+        },
+        "metrics": {
+          "operation_count": 0,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 39,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [
+          {
+            "command_index": 10,
+            "feature": "identity_preserving_move",
+            "reason": "Yrs 0.27.3 has no native Array move"
+          }
+        ],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "list-move-10k-r10",
+      "workload": "list_move",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230030,
+      "repetition": 2,
+      "wall_time_ns": 3256959,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 694,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "list-move-10k-r10",
+        "status": "unsupported",
+        "commands_executed": 13,
+        "state_hashes": {
+          "final": "e111c780ee79e763cce51f027d46ad958e7ff22b22fd6903caa388ffd276be8a"
+        },
+        "metrics": {
+          "operation_count": 0,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 39,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [
+          {
+            "command_index": 10,
+            "feature": "identity_preserving_move",
+            "reason": "Yrs 0.27.3 has no native Array move"
+          }
+        ],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "properties-10k-r100",
+      "workload": "properties",
+      "operations": 10000,
+      "replicas": 100,
+      "seed": 764230031,
+      "repetition": 0,
+      "wall_time_ns": 10911792,
+      "peak_rss_bytes": 18513920,
+      "stdout_bytes": 14483,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "properties-10k-r100",
+        "status": "passed",
+        "commands_executed": 103,
+        "state_hashes": {
+          "final": "a62761ed713bdee05bb0d3bddd774ac05e7329dd1665474be2e210c6e024876b"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 13928,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "properties-10k-r100",
+      "workload": "properties",
+      "operations": 10000,
+      "replicas": 100,
+      "seed": 764230031,
+      "repetition": 1,
+      "wall_time_ns": 11353959,
+      "peak_rss_bytes": 12976128,
+      "stdout_bytes": 14483,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "properties-10k-r100",
+        "status": "passed",
+        "commands_executed": 103,
+        "state_hashes": {
+          "final": "a62761ed713bdee05bb0d3bddd774ac05e7329dd1665474be2e210c6e024876b"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 13928,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "properties-10k-r100",
+      "workload": "properties",
+      "operations": 10000,
+      "replicas": 100,
+      "seed": 764230031,
+      "repetition": 2,
+      "wall_time_ns": 10772958,
+      "peak_rss_bytes": 18546688,
+      "stdout_bytes": 14483,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "properties-10k-r100",
+        "status": "passed",
+        "commands_executed": 103,
+        "state_hashes": {
+          "final": "a62761ed713bdee05bb0d3bddd774ac05e7329dd1665474be2e210c6e024876b"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 13928,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "properties-10k-r100",
+      "workload": "properties",
+      "operations": 10000,
+      "replicas": 100,
+      "seed": 764230031,
+      "repetition": 0,
+      "wall_time_ns": 131187125,
+      "peak_rss_bytes": 5783552,
+      "stdout_bytes": 14484,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "properties-10k-r100",
+        "status": "passed",
+        "commands_executed": 103,
+        "state_hashes": {
+          "final": "a62761ed713bdee05bb0d3bddd774ac05e7329dd1665474be2e210c6e024876b"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 13928,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "properties-10k-r100",
+      "workload": "properties",
+      "operations": 10000,
+      "replicas": 100,
+      "seed": 764230031,
+      "repetition": 1,
+      "wall_time_ns": 134485375,
+      "peak_rss_bytes": 5816320,
+      "stdout_bytes": 14484,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "properties-10k-r100",
+        "status": "passed",
+        "commands_executed": 103,
+        "state_hashes": {
+          "final": "a62761ed713bdee05bb0d3bddd774ac05e7329dd1665474be2e210c6e024876b"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 13928,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "properties-10k-r100",
+      "workload": "properties",
+      "operations": 10000,
+      "replicas": 100,
+      "seed": 764230031,
+      "repetition": 2,
+      "wall_time_ns": 137826083,
+      "peak_rss_bytes": 5799936,
+      "stdout_bytes": 14484,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "properties-10k-r100",
+        "status": "passed",
+        "commands_executed": 103,
+        "state_hashes": {
+          "final": "a62761ed713bdee05bb0d3bddd774ac05e7329dd1665474be2e210c6e024876b"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 0,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 13928,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "offline-1k-r2",
+      "workload": "offline_merge",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230032,
+      "repetition": 0,
+      "wall_time_ns": 3355541,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1587,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "offline-1k-r2",
+        "status": "passed",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 1212,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "offline-1k-r2",
+      "workload": "offline_merge",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230032,
+      "repetition": 1,
+      "wall_time_ns": 3298125,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1587,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "offline-1k-r2",
+        "status": "passed",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 1212,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "offline-1k-r2",
+      "workload": "offline_merge",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230032,
+      "repetition": 2,
+      "wall_time_ns": 3126125,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1587,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "offline-1k-r2",
+        "status": "passed",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 1212,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "offline-1k-r2",
+      "workload": "offline_merge",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230032,
+      "repetition": 0,
+      "wall_time_ns": 3829458,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1588,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "offline-1k-r2",
+        "status": "passed",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 1042,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "offline-1k-r2",
+      "workload": "offline_merge",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230032,
+      "repetition": 1,
+      "wall_time_ns": 3186709,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1588,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "offline-1k-r2",
+        "status": "passed",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 1042,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "offline-1k-r2",
+      "workload": "offline_merge",
+      "operations": 1000,
+      "replicas": 2,
+      "seed": 764230032,
+      "repetition": 2,
+      "wall_time_ns": 3074292,
+      "peak_rss_bytes": 0,
+      "stdout_bytes": 1588,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "offline-1k-r2",
+        "status": "passed",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "c2a1952e28027ee99a020eb86486d6d1cca4170f320599b4dfe1f419185150ec"
+        },
+        "metrics": {
+          "operation_count": 1000,
+          "update_bytes": 1042,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 1039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "offline-10k-r10",
+      "workload": "offline_merge",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230033,
+      "repetition": 0,
+      "wall_time_ns": 5654792,
+      "peak_rss_bytes": 4030464,
+      "stdout_bytes": 10593,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "offline-10k-r10",
+        "status": "passed",
+        "commands_executed": 41,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 11120,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "offline-10k-r10",
+      "workload": "offline_merge",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230033,
+      "repetition": 1,
+      "wall_time_ns": 6069666,
+      "peak_rss_bytes": 3981312,
+      "stdout_bytes": 10593,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "offline-10k-r10",
+        "status": "passed",
+        "commands_executed": 41,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 11120,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "offline-10k-r10",
+      "workload": "offline_merge",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230033,
+      "repetition": 2,
+      "wall_time_ns": 5947042,
+      "peak_rss_bytes": 3883008,
+      "stdout_bytes": 10593,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "offline-10k-r10",
+        "status": "passed",
+        "commands_executed": 41,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 11120,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "offline-10k-r10",
+      "workload": "offline_merge",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230033,
+      "repetition": 0,
+      "wall_time_ns": 11607250,
+      "peak_rss_bytes": 2539520,
+      "stdout_bytes": 10594,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "offline-10k-r10",
+        "status": "passed",
+        "commands_executed": 41,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 10210,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "offline-10k-r10",
+      "workload": "offline_merge",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230033,
+      "repetition": 1,
+      "wall_time_ns": 13767209,
+      "peak_rss_bytes": 2523136,
+      "stdout_bytes": 10594,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "offline-10k-r10",
+        "status": "passed",
+        "commands_executed": 41,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 10210,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "offline-10k-r10",
+      "workload": "offline_merge",
+      "operations": 10000,
+      "replicas": 10,
+      "seed": 764230033,
+      "repetition": 2,
+      "wall_time_ns": 11107458,
+      "peak_rss_bytes": 2539520,
+      "stdout_bytes": 10594,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "offline-10k-r10",
+        "status": "passed",
+        "commands_executed": 41,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 10210,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "offline-100k-r100",
+      "workload": "offline_merge",
+      "operations": 100000,
+      "replicas": 100,
+      "seed": 764230034,
+      "repetition": 0,
+      "wall_time_ns": 138242250,
+      "peak_rss_bytes": 8978432,
+      "stdout_bytes": 100599,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "offline-100k-r100",
+        "status": "passed",
+        "commands_executed": 401,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 111200,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "offline-100k-r100",
+      "workload": "offline_merge",
+      "operations": 100000,
+      "replicas": 100,
+      "seed": 764230034,
+      "repetition": 1,
+      "wall_time_ns": 138213500,
+      "peak_rss_bytes": 8978432,
+      "stdout_bytes": 100599,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "offline-100k-r100",
+        "status": "passed",
+        "commands_executed": 401,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 111200,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "offline-100k-r100",
+      "workload": "offline_merge",
+      "operations": 100000,
+      "replicas": 100,
+      "seed": 764230034,
+      "repetition": 2,
+      "wall_time_ns": 140583834,
+      "peak_rss_bytes": 8896512,
+      "stdout_bytes": 100599,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "offline-100k-r100",
+        "status": "passed",
+        "commands_executed": 401,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 111200,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "offline-100k-r100",
+      "workload": "offline_merge",
+      "operations": 100000,
+      "replicas": 100,
+      "seed": 764230034,
+      "repetition": 0,
+      "wall_time_ns": 86464458,
+      "peak_rss_bytes": 3489792,
+      "stdout_bytes": 100600,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "offline-100k-r100",
+        "status": "passed",
+        "commands_executed": 401,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 102100,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "offline-100k-r100",
+      "workload": "offline_merge",
+      "operations": 100000,
+      "replicas": 100,
+      "seed": 764230034,
+      "repetition": 1,
+      "wall_time_ns": 87252291,
+      "peak_rss_bytes": 3670016,
+      "stdout_bytes": 100600,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "offline-100k-r100",
+        "status": "passed",
+        "commands_executed": 401,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 102100,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "offline-100k-r100",
+      "workload": "offline_merge",
+      "operations": 100000,
+      "replicas": 100,
+      "seed": 764230034,
+      "repetition": 2,
+      "wall_time_ns": 88357750,
+      "peak_rss_bytes": 3506176,
+      "stdout_bytes": 100600,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "offline-100k-r100",
+        "status": "passed",
+        "commands_executed": 401,
+        "state_hashes": {
+          "final": "9bf12cc3859a663a2114088be797fa22b892b9a6bdd6b75bf32a62414770e043"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 102100,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 100039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "snapshot-100k-r2",
+      "workload": "snapshot_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230035,
+      "repetition": 0,
+      "wall_time_ns": 209485458,
+      "peak_rss_bytes": 269991936,
+      "stdout_bytes": 2549004,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "snapshot-100k-r2",
+        "status": "passed",
+        "commands_executed": 8,
+        "state_hashes": {
+          "final": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6",
+          "restored": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 929148,
+          "materialized_bytes": 2548356,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "snapshot-100k-r2",
+      "workload": "snapshot_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230035,
+      "repetition": 1,
+      "wall_time_ns": 211418917,
+      "peak_rss_bytes": 271024128,
+      "stdout_bytes": 2549004,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "snapshot-100k-r2",
+        "status": "passed",
+        "commands_executed": 8,
+        "state_hashes": {
+          "final": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6",
+          "restored": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 929148,
+          "materialized_bytes": 2548356,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "snapshot-100k-r2",
+      "workload": "snapshot_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230035,
+      "repetition": 2,
+      "wall_time_ns": 211442208,
+      "peak_rss_bytes": 270876672,
+      "stdout_bytes": 2549004,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "snapshot-100k-r2",
+        "status": "passed",
+        "commands_executed": 8,
+        "state_hashes": {
+          "final": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6",
+          "restored": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 929148,
+          "materialized_bytes": 2548356,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "snapshot-100k-r2",
+      "workload": "snapshot_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230035,
+      "repetition": 0,
+      "wall_time_ns": 12680314083,
+      "peak_rss_bytes": 68714496,
+      "stdout_bytes": 2549006,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "snapshot-100k-r2",
+        "status": "passed",
+        "commands_executed": 8,
+        "state_hashes": {
+          "final": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6",
+          "restored": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 2335442,
+          "materialized_bytes": 2548356,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "snapshot-100k-r2",
+      "workload": "snapshot_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230035,
+      "repetition": 1,
+      "wall_time_ns": 12726159000,
+      "peak_rss_bytes": 68550656,
+      "stdout_bytes": 2549006,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "snapshot-100k-r2",
+        "status": "passed",
+        "commands_executed": 8,
+        "state_hashes": {
+          "final": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6",
+          "restored": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 2335442,
+          "materialized_bytes": 2548356,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "snapshot-100k-r2",
+      "workload": "snapshot_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230035,
+      "repetition": 2,
+      "wall_time_ns": 11903425750,
+      "peak_rss_bytes": 68730880,
+      "stdout_bytes": 2549006,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "snapshot-100k-r2",
+        "status": "passed",
+        "commands_executed": 8,
+        "state_hashes": {
+          "final": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6",
+          "restored": "49174d26b43e13992946fb21d024e01b0ae620c6ade1db3c4e9bb63c1c531dc6"
+        },
+        "metrics": {
+          "operation_count": 100000,
+          "update_bytes": 0,
+          "snapshot_bytes": 2335442,
+          "materialized_bytes": 2548356,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "incremental-10k-r2",
+      "workload": "incremental_update",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230036,
+      "repetition": 0,
+      "wall_time_ns": 6357334,
+      "peak_rss_bytes": 4014080,
+      "stdout_bytes": 10596,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "incremental-10k-r2",
+        "status": "passed",
+        "commands_executed": 10,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 10358,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "incremental-10k-r2",
+      "workload": "incremental_update",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230036,
+      "repetition": 1,
+      "wall_time_ns": 5611375,
+      "peak_rss_bytes": 4014080,
+      "stdout_bytes": 10596,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "incremental-10k-r2",
+        "status": "passed",
+        "commands_executed": 10,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 10358,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "incremental-10k-r2",
+      "workload": "incremental_update",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230036,
+      "repetition": 2,
+      "wall_time_ns": 6353750,
+      "peak_rss_bytes": 4030464,
+      "stdout_bytes": 10596,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "incremental-10k-r2",
+        "status": "passed",
+        "commands_executed": 10,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 10358,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "incremental-10k-r2",
+      "workload": "incremental_update",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230036,
+      "repetition": 0,
+      "wall_time_ns": 38581875,
+      "peak_rss_bytes": 2392064,
+      "stdout_bytes": 10597,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "incremental-10k-r2",
+        "status": "passed",
+        "commands_executed": 10,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 10047,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "incremental-10k-r2",
+      "workload": "incremental_update",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230036,
+      "repetition": 1,
+      "wall_time_ns": 39184041,
+      "peak_rss_bytes": 2392064,
+      "stdout_bytes": 10597,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "incremental-10k-r2",
+        "status": "passed",
+        "commands_executed": 10,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 10047,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "incremental-10k-r2",
+      "workload": "incremental_update",
+      "operations": 10000,
+      "replicas": 2,
+      "seed": 764230036,
+      "repetition": 2,
+      "wall_time_ns": 38902125,
+      "peak_rss_bytes": 2408448,
+      "stdout_bytes": 10597,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "incremental-10k-r2",
+        "status": "passed",
+        "commands_executed": 10,
+        "state_hashes": {
+          "final": "44ec0517675f4be5800e67140f4784b630f2fc6b6419010d6b7599cb03bbcd89"
+        },
+        "metrics": {
+          "operation_count": 10000,
+          "update_bytes": 10047,
+          "snapshot_bytes": 0,
+          "materialized_bytes": 10039,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "compacted-100k-r2",
+      "workload": "compacted_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230037,
+      "repetition": 0,
+      "wall_time_ns": 216906625,
+      "peak_rss_bytes": 272089088,
+      "stdout_bytes": 2549042,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "compacted-100k-r2",
+        "status": "passed",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "7874aced5179759b3a17ebe0cade6614cbb8a12edd019e42671d9ff98f189839",
+          "restored": "a1c16f730355a1e0b8e05a2820c7db0dce64dd769ad225874dc1cc26a360b2c0"
+        },
+        "metrics": {
+          "operation_count": 100001,
+          "update_bytes": 0,
+          "snapshot_bytes": 306596,
+          "materialized_bytes": 2548393,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "compacted-100k-r2",
+      "workload": "compacted_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230037,
+      "repetition": 1,
+      "wall_time_ns": 196332875,
+      "peak_rss_bytes": 271892480,
+      "stdout_bytes": 2549042,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "compacted-100k-r2",
+        "status": "passed",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "7874aced5179759b3a17ebe0cade6614cbb8a12edd019e42671d9ff98f189839",
+          "restored": "a1c16f730355a1e0b8e05a2820c7db0dce64dd769ad225874dc1cc26a360b2c0"
+        },
+        "metrics": {
+          "operation_count": 100001,
+          "update_bytes": 0,
+          "snapshot_bytes": 306596,
+          "materialized_bytes": 2548393,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "loro",
+      "case": "compacted-100k-r2",
+      "workload": "compacted_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230037,
+      "repetition": 2,
+      "wall_time_ns": 210104583,
+      "peak_rss_bytes": 272039936,
+      "stdout_bytes": 2549042,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "loro",
+        "candidate_version": "1.13.7",
+        "scenario": "compacted-100k-r2",
+        "status": "passed",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "7874aced5179759b3a17ebe0cade6614cbb8a12edd019e42671d9ff98f189839",
+          "restored": "a1c16f730355a1e0b8e05a2820c7db0dce64dd769ad225874dc1cc26a360b2c0"
+        },
+        "metrics": {
+          "operation_count": 100001,
+          "update_bytes": 0,
+          "snapshot_bytes": 306596,
+          "materialized_bytes": 2548393,
+          "native_features": {
+            "identity_preserving_move": true,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": true
+          }
+        },
+        "unsupported": [],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "compacted-100k-r2",
+      "workload": "compacted_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230037,
+      "repetition": 0,
+      "wall_time_ns": 12929869459,
+      "peak_rss_bytes": 66486272,
+      "stdout_bytes": 2549191,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "compacted-100k-r2",
+        "status": "unsupported",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "7874aced5179759b3a17ebe0cade6614cbb8a12edd019e42671d9ff98f189839",
+          "restored": "a1c16f730355a1e0b8e05a2820c7db0dce64dd769ad225874dc1cc26a360b2c0"
+        },
+        "metrics": {
+          "operation_count": 100001,
+          "update_bytes": 0,
+          "snapshot_bytes": 2335442,
+          "materialized_bytes": 2548393,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [
+          {
+            "command_index": 3,
+            "feature": "compacted_snapshot",
+            "reason": "Yrs 0.27.3 exposes update snapshots but no native shallow/compacted snapshot API"
+          }
+        ],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "compacted-100k-r2",
+      "workload": "compacted_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230037,
+      "repetition": 1,
+      "wall_time_ns": 12498293625,
+      "peak_rss_bytes": 68583424,
+      "stdout_bytes": 2549191,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "compacted-100k-r2",
+        "status": "unsupported",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "7874aced5179759b3a17ebe0cade6614cbb8a12edd019e42671d9ff98f189839",
+          "restored": "a1c16f730355a1e0b8e05a2820c7db0dce64dd769ad225874dc1cc26a360b2c0"
+        },
+        "metrics": {
+          "operation_count": 100001,
+          "update_bytes": 0,
+          "snapshot_bytes": 2335442,
+          "materialized_bytes": 2548393,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [
+          {
+            "command_index": 3,
+            "feature": "compacted_snapshot",
+            "reason": "Yrs 0.27.3 exposes update snapshots but no native shallow/compacted snapshot API"
+          }
+        ],
+        "errors": []
+      }
+    },
+    {
+      "candidate": "yrs",
+      "case": "compacted-100k-r2",
+      "workload": "compacted_restore",
+      "operations": 100000,
+      "replicas": 2,
+      "seed": 764230037,
+      "repetition": 2,
+      "wall_time_ns": 11773677125,
+      "peak_rss_bytes": 66846720,
+      "stdout_bytes": 2549191,
+      "exit_code": 0,
+      "response_summary": {
+        "protocol": "secondbrain-crdt-spike-v1",
+        "candidate": "yrs",
+        "candidate_version": "0.27.3",
+        "scenario": "compacted-100k-r2",
+        "status": "unsupported",
+        "commands_executed": 9,
+        "state_hashes": {
+          "final": "7874aced5179759b3a17ebe0cade6614cbb8a12edd019e42671d9ff98f189839",
+          "restored": "a1c16f730355a1e0b8e05a2820c7db0dce64dd769ad225874dc1cc26a360b2c0"
+        },
+        "metrics": {
+          "operation_count": 100001,
+          "update_bytes": 0,
+          "snapshot_bytes": 2335442,
+          "materialized_bytes": 2548393,
+          "native_features": {
+            "identity_preserving_move": false,
+            "per_peer_undo": true,
+            "relative_positions": true,
+            "rich_text_marks": true,
+            "shallow_snapshot": false
+          }
+        },
+        "unsupported": [
+          {
+            "command_index": 3,
+            "feature": "compacted_snapshot",
+            "reason": "Yrs 0.27.3 exposes update snapshots but no native shallow/compacted snapshot API"
+          }
+        ],
+        "errors": []
+      }
+    }
+  ]
+}

@@ -11,6 +11,8 @@ allow = [
     "CC0-1.0",
     "ISC",
     "MIT",
+    "MPL-2.0",
+    "BSL-1.0",
     "Unicode-3.0",
     "Zlib",
 ]
@@ -20,6 +22,20 @@ skip = [
     { crate = "syn@2.0.119", reason = "ULID wasm support requires web-time and wasm-bindgen, which still uses syn 2" },
     { crate = "hashbrown@0.16.1", reason = "rusqlite 0.39 uses hashlink/sqlite-wasm-rs on hashbrown 0.16 while serde_yaml uses indexmap on hashbrown 0.17" },
     { crate = "windows-sys@0.60.2", reason = "notify 8.2 and notify-debouncer-full 0.7 require windows-sys 0.60 while tempfile/rustix require 0.61" },
+    { crate = "enum-as-inner@0.5.1", reason = "Loro 1.13.7 transitively uses both enum-as-inner generations" },
+    { crate = "getrandom@0.2.17", reason = "Loro uses rand 0.8 while workspace IDs use rand 0.10" },
+    { crate = "getrandom@0.3.4", reason = "Loro cache and proptest use the rand 0.9 generation" },
+    { crate = "hash32@0.2.1", reason = "Loro postcard and current heapless use different hash32 generations" },
+    { crate = "heapless@0.7.17", reason = "Loro postcard retains heapless 0.7" },
+    { crate = "heapless@0.8.0", reason = "Loro delta retains heapless 0.8 while generic-btree uses 0.9" },
+    { crate = "heck@0.4.1", reason = "Loro delta macro uses heck 0.4 while clap and current macros use 0.5" },
+    { crate = "itertools@0.11.0", reason = "Loro data structures use itertools 0.11 and 0.12 internally" },
+    { crate = "r-efi@5.3.0", reason = "getrandom 0.3 and 0.4 target different WASI generations" },
+    { crate = "rand@0.8.7", reason = "Loro 1.13.7 internally uses rand 0.8" },
+    { crate = "rand_core@0.6.4", reason = "Loro 1.13.7 internally uses rand_core 0.6" },
+    { crate = "syn@1.0.109", reason = "Loro delta's legacy enum macro still uses syn 1" },
+    { crate = "thiserror@1.0.69", reason = "Loro internals use thiserror 1 while workspace crates use 2" },
+    { crate = "thiserror-impl@1.0.69", reason = "paired with Loro's thiserror 1 dependency" },
 ]
 
 [sources]

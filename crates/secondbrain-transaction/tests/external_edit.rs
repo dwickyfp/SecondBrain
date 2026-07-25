@@ -1623,7 +1623,7 @@ fn a_tracked_note_whose_converged_base_was_lost_is_reported_rather_than_register
         workspace
             .root
             .canonical_path()
-            .join(format!(".secondbrain/snapshots/{note_id}.json")),
+            .join(format!(".secondbrain/crdt/{note_id}.sbcrdt")),
     )
     .expect("remove converged base");
     workspace.write(NOTE, &external);

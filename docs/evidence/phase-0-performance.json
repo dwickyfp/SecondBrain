@@ -1,0 +1,185 @@
+{
+  "schema": "secondbrain-phase0-benchmark-v1",
+  "runs": [
+    {
+      "notes": 1000,
+      "source_hash_before": "b5d5757094b15352dfff233bfa0b24c4fada72cff4936e9cf3e9c3145fb02c17",
+      "source_hash_after": "242e05551958f9c479c6b68535cba507a1ebe93565a848bf69314b1cdc694add",
+      "index_bytes": 802816,
+      "stages": {
+        "init": {
+          "elapsed_ms": 25.341791988466866,
+          "response_sha256": "4464208daa0c134b18a1e3771607a2046a6b2c4472541b7611224064f4c4afb9",
+          "response_summary": {
+            "workspace": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmp6zukco09",
+            "workspace_id": "01KYDG36K0CRCHBV8HQE4B1Q3K",
+            "format_version": 1,
+            "created_at": "2026-07-25T20:40:01Z",
+            "required_features": [
+              "oplog"
+            ]
+          }
+        },
+        "index": {
+          "elapsed_ms": 14860.731291992124,
+          "response_sha256": "c7b9dbecad8a43fed2792e05b89302b42d764c47f96ee81e7f20a4e30f444fc2",
+          "response_summary": {
+            "workspace": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmp6zukco09",
+            "index": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmp6zukco09/.secondbrain/index.sqlite",
+            "indexed": 1000,
+            "skipped": 0,
+            "warnings": 0,
+            "errors": 0,
+            "orphans": 0,
+            "broken_links": 0
+          }
+        },
+        "search": {
+          "elapsed_ms": 10.039708009571768,
+          "response_sha256": "4af4b071f7afa9e4290a1dfb7e85bebfd73c32f9a02bc66e7b7c4362d9167135",
+          "response_summary": {
+            "query": "benchmark-canary-500",
+            "hits": [
+              {
+                "note_id": "01KYDG3DGZKSRDK5MYDNJB5T56",
+                "path": "notes/note-00500.md",
+                "title": "Note 500",
+                "snippet": "Note 500 [benchmark-canary-500] links to [[note-00501]]. task 500"
+              }
+            ]
+          }
+        },
+        "reconcile": {
+          "elapsed_ms": 581.9962499954272,
+          "response_sha256": "dfeefbae7f8c61b7ee001517f2ca1bb150dba8994ace99cfc5b8e51c9383cf45",
+          "response_summary": {
+            "considered": 1000,
+            "adopted": 1,
+            "merged": 0,
+            "reviews_required": 0,
+            "absent": 0,
+            "unchanged": 999,
+            "index_refreshed": true
+          }
+        },
+        "reconcile_noop": {
+          "elapsed_ms": 71.78462498995941,
+          "response_sha256": "eea9f57f295ba44e743ccaca03dabacf7ffaf148645afd34138854191f1228df",
+          "response_summary": {
+            "considered": 1000,
+            "adopted": 0,
+            "merged": 0,
+            "reviews_required": 0,
+            "absent": 0,
+            "unchanged": 1000,
+            "index_refreshed": false
+          }
+        },
+        "rebuild_after_delete": {
+          "elapsed_ms": 129.7492500016233,
+          "response_sha256": "c7b9dbecad8a43fed2792e05b89302b42d764c47f96ee81e7f20a4e30f444fc2",
+          "response_summary": {
+            "workspace": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmp6zukco09",
+            "index": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmp6zukco09/.secondbrain/index.sqlite",
+            "indexed": 1000,
+            "skipped": 0,
+            "warnings": 0,
+            "errors": 0,
+            "orphans": 0,
+            "broken_links": 0
+          }
+        }
+      }
+    },
+    {
+      "notes": 10000,
+      "source_hash_before": "436eeb62181eb6497098cc34a8afee99b35dca577fcb51c87a13e28c761d7164",
+      "source_hash_after": "d5f81019ff8d2f59e8247adae2b73b2ac137dd82455d23fa3a377e88b8fd71ee",
+      "index_bytes": 7139328,
+      "stages": {
+        "init": {
+          "elapsed_ms": 33.925958996405825,
+          "response_sha256": "830cb3143c143cc143b7f35e3c30124292c84b0c2749943671646557f900e5b6",
+          "response_summary": {
+            "workspace": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmph2156xiu",
+            "workspace_id": "01KYDG3QE57V1P40S20TJN2EAH",
+            "format_version": 1,
+            "created_at": "2026-07-25T20:40:18Z",
+            "required_features": [
+              "oplog"
+            ]
+          }
+        },
+        "index": {
+          "elapsed_ms": 189588.42749999894,
+          "response_sha256": "e225c1e48e12e40a9bb9d0ab0e160f9ced29e311adc2a8bb8147ae94fc4b1ae2",
+          "response_summary": {
+            "workspace": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmph2156xiu",
+            "index": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmph2156xiu/.secondbrain/index.sqlite",
+            "indexed": 10000,
+            "skipped": 0,
+            "warnings": 0,
+            "errors": 0,
+            "orphans": 0,
+            "broken_links": 0
+          }
+        },
+        "search": {
+          "elapsed_ms": 36.72120899136644,
+          "response_sha256": "a9c34267515765b532e1ab3d82af1394e2ecdabf2d38f52289c6dd0fbc2c646a",
+          "response_summary": {
+            "query": "benchmark-canary-5000",
+            "hits": [
+              {
+                "note_id": "01KYDG61FG5MD8EX05CEE2VZM0",
+                "path": "notes/note-05000.md",
+                "title": "Note 5000",
+                "snippet": "Note 5000 [benchmark-canary-5000] links to [[note-05001]]. task 5000"
+              }
+            ]
+          }
+        },
+        "reconcile": {
+          "elapsed_ms": 8981.67779200594,
+          "response_sha256": "5d65780f026feea31f42a1c7d4eb13835a972c19126770d78e8a4d6c57a91ba7",
+          "response_summary": {
+            "considered": 10000,
+            "adopted": 1,
+            "merged": 0,
+            "reviews_required": 0,
+            "absent": 0,
+            "unchanged": 9999,
+            "index_refreshed": true
+          }
+        },
+        "reconcile_noop": {
+          "elapsed_ms": 997.1021670062328,
+          "response_sha256": "fd585b2d7b05ae7c2112a3c841c4a657f100349d5124e49e01b71cc852cbe4cb",
+          "response_summary": {
+            "considered": 10000,
+            "adopted": 0,
+            "merged": 0,
+            "reviews_required": 0,
+            "absent": 0,
+            "unchanged": 10000,
+            "index_refreshed": false
+          }
+        },
+        "rebuild_after_delete": {
+          "elapsed_ms": 2053.436582995346,
+          "response_sha256": "e225c1e48e12e40a9bb9d0ab0e160f9ced29e311adc2a8bb8147ae94fc4b1ae2",
+          "response_summary": {
+            "workspace": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmph2156xiu",
+            "index": "/private/var/folders/xz/yr_gwc2551l_29g4nj8x8n4c0000gn/T/tmph2156xiu/.secondbrain/index.sqlite",
+            "indexed": 10000,
+            "skipped": 0,
+            "warnings": 0,
+            "errors": 0,
+            "orphans": 0,
+            "broken_links": 0
+          }
+        }
+      }
+    }
+  ]
+}

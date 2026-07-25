@@ -36,7 +36,7 @@ SecondBrain uses the Rust-first hybrid CRDT architecture.
 | WYSIWYG editor | TipTap over ProseMirror |
 | Source editor | CodeMirror 6 |
 | Local derived store | SQLite WAL + FTS5 |
-| Collaboration | Per-note CRDT; Loro vs Yrs selected by mandatory spike |
+| Collaboration | Per-note Loro 1.13.7 CRDT; selected by [ADR 0001](../adr/0001-select-production-crdt.md) |
 | Self-hosted server | Rust + Axum |
 | P2P transport | QUIC + mDNS; libp2p only if justified by spike |
 | Plugin runtime | Wasmtime + WASI Component Model |
@@ -620,7 +620,7 @@ Do not build managed cloud hosting, a public marketplace, bundled local LLMs, em
 
 These are deliberately bounded engineering decisions rather than unresolved product requirements:
 
-1. Loro versus Yrs.
+1. Loro versus Yrs: resolved in favor of Loro 1.13.7 by [ADR 0001](../adr/0001-select-production-crdt.md); production integration remains a separate task.
 2. Protobuf versus postcard/CBOR wire encoding.
 3. Exact P2P/NAT traversal implementation beyond LAN QUIC/mDNS.
 4. XChaCha20-Poly1305 versus AES-256-GCM after platform/audit evaluation.

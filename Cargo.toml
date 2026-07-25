@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/secondbrain-cli", "crates/secondbrain-core", "crates/secondbrain-index", "crates/secondbrain-transaction", "crates/secondbrain-vault", "crates/secondbrain-markdown"]
+members = ["crates/secondbrain-cli", "crates/secondbrain-core", "crates/secondbrain-crdt", "crates/secondbrain-index", "crates/secondbrain-transaction", "crates/secondbrain-vault", "crates/secondbrain-markdown", "spikes/crdt-comparison/contract", "spikes/crdt-comparison/loro-candidate", "spikes/crdt-comparison/benches"]
+exclude = ["spikes/crdt-comparison/yrs-candidate"]
 resolver = "3"
 
 [workspace.package]
@@ -13,19 +14,19 @@ blake3 = "1.8.5"
 clap = { version = "4.6.4", features = ["derive"] }
 crc32fast = "1.5.0"
 criterion = "0.8.2"
-loro = "1.13.7"
+loro = "=1.13.7"
 markdown = "1.0.0"
 notify = "8.2.0"
 proptest = "1.11.0"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.145"
 serde_yaml = "0.9.34"
 tempfile = "3.27.0"
 thiserror = "2.0.19"
 toml = "1.1.3"
 tracing = "0.1.44"
 ulid = { version = "3.0.0", features = ["serde"] }
-yrs = "0.27.3"
 
 [profile.release]
 lto = "thin"

@@ -9,6 +9,7 @@ license.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+secondbrain-crdt = { path = "../secondbrain-crdt" }
 notify.workspace = true
 notify-debouncer-full = "0.7.0"
 secondbrain-core = { path = "../secondbrain-core" }

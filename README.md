@@ -4,6 +4,8 @@ SecondBrain is a Rust-first project for a local-first knowledge system with Mark
 
 This repository currently contains the Phase 0 Rust workspace: the domain, Markdown, vault, index, and transaction crates, and the `secondbrain` command-line surface over them. Product features described in `docs/` are design and implementation targets, not completed functionality.
 
+The mandatory CRDT spike selected **Loro 1.13.7** for production integration. Loro passed all shared mandatory scenarios; Yrs 0.27.3 was ineligible because it lacks a native identity-preserving ordered move and also requires an unstable compiler feature on the pinned Rust toolchain. See [ADR 0001](docs/adr/0001-select-production-crdt.md). The canonical per-note state is documented in [Phase 0 formats](docs/phase-0-format.md) and operated through [Phase 0 operations](docs/phase-0-operations.md).
+
 ## The `secondbrain` CLI
 
 The CLI holds no domain logic of its own. Every command composes calls into the library crates, so that the desktop app, the MCP server, and the local API can later drive the same paths this binary drives.

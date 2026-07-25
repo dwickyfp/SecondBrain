@@ -27,11 +27,8 @@ pub fn prepare_and_crash(root: &Path, boundary: &str, hard: bool) {
     fs::create_dir_all(root.join("notes")).unwrap();
     fs::write(root.join("notes/test.md"), "# Note\n").unwrap();
     if hard {
-        // SAFETY: the real crash child is a fresh single-threaded process.
-        unsafe {
-            std::env::set_var("SECONDBRAIN_TEST_FAILPOINT", boundary);
-            std::env::set_var("SECONDBRAIN_TEST_FAILPOINT_ABORT", "1");
-        }
+        secondbrain_transaction::failpoint::set(Some(boundary));
+        secondbrain_transaction::failpoint::set_abort(true);
     } else {
         secondbrain_transaction::failpoint::set(Some(boundary));
     }
@@ -54,11 +51,8 @@ pub fn prepare_and_crash(root: &Path, boundary: &str, hard: bool) {
     if !hard {
         secondbrain_transaction::failpoint::set(None);
     }
-    // SAFETY: no other threads access these test-only variables.
-    unsafe {
-        std::env::remove_var("SECONDBRAIN_TEST_FAILPOINT");
-        std::env::remove_var("SECONDBRAIN_TEST_FAILPOINT_ABORT");
-    }
+    secondbrain_transaction::failpoint::set_abort(false);
+    secondbrain_transaction::failpoint::set(None);
 }
 
 pub fn oplog_path(root: &Path) -> PathBuf {

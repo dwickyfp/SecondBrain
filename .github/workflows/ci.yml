@@ -40,6 +40,34 @@ jobs:
       - name: Test
         run: cargo test --locked --workspace --all-features
 
+      - name: Platform contract tests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          cargo test --locked -p secondbrain-vault --test platform -- --nocapture 2>&1 | tee "artifacts/platform-${{ runner.os }}.log"
+
+      - name: Phase 0 e2e
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          cargo test --locked -p secondbrain-cli --test e2e_phase0 -- --nocapture 2>&1 | tee "artifacts/e2e-${{ runner.os }}.log"
+
+      - name: Benchmark smoke request
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cargo run --locked -p crdt-comparison-bench -- smoke text 100 2 764230027 > "artifacts/benchmark-smoke-${{ runner.os }}.json"
+
+      - name: Upload test and benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+        with:
+          name: phase-0-${{ runner.os }}
+          path: artifacts/
+          if-no-files-found: warn
+
   dependency-policy:
     name: Dependency policy
     runs-on: ubuntu-latest

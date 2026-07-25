@@ -150,6 +150,39 @@ fn malformed_note_is_reported_without_destroying_valid_index() {
     );
 }
 
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+#[test]
+fn portable_case_collision_is_rejected_deterministically() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("Nova.md"), "# Nova\n").unwrap();
+    fs::write(dir.path().join("nova.md"), "# nova\n").unwrap();
+
+    assert!(matches!(
+        rebuild(dir.path(), &IndexConfig::default()),
+        Err(IndexError::PathCollision { first, second })
+            if first == "Nova.md" && second == "nova.md"
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_filename_is_rejected_instead_of_lossily_indexed() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = tempdir().unwrap();
+    let name = std::ffi::OsString::from_vec(vec![b'n', b'o', b't', b'e', 0xff, b'.', b'm', b'd']);
+    let path = dir.path().join(name);
+    let Ok(()) = fs::write(&path, "# Note\n") else {
+        eprintln!("SKIP: filesystem rejects non-UTF-8 filenames");
+        return;
+    };
+
+    assert!(matches!(
+        rebuild(dir.path(), &IndexConfig::default()),
+        Err(IndexError::NonUtf8Path { path: rejected }) if rejected == path
+    ));
+}
+
 #[test]
 fn fixture_workspace_is_stable() {
     let fixture =
@@ -284,8 +317,9 @@ fn a_workspace_whose_notes_have_no_base_is_healed_by_the_next_rebuild() {
     plain_workspace(dir.path());
     rebuild(dir.path(), &IndexConfig::default()).unwrap();
     let alpha = indexed_id(dir.path(), "notes/alpha.md");
-    // What a workspace indexed by a build that recorded no bases looks like.
-    fs::remove_dir_all(dir.path().join(".secondbrain/snapshots")).unwrap();
+    // What a workspace indexed by a build that recorded no canonical state
+    // looks like. The legacy snapshot directory is only migration input now.
+    fs::remove_dir_all(dir.path().join(".secondbrain/crdt")).unwrap();
     assert!(bases(dir.path()).load(alpha).unwrap().is_none());
 
     rebuild(dir.path(), &IndexConfig::default()).unwrap();

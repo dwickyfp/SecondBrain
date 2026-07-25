@@ -27,6 +27,7 @@
 //! Records store the note's own source text, a workspace-relative path, a
 //! content hash, and a note version. No OS-absolute paths and no secrets.
 
+#[cfg(test)]
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -95,6 +96,8 @@ pub enum SnapshotError {
     Vault(#[from] secondbrain_core::Error),
     #[error("converged base could not be parsed for identity evidence: {0}")]
     Parse(#[from] secondbrain_markdown::parse::ParseError),
+    #[error("canonical CRDT state failed: {0}")]
+    Crdt(#[from] secondbrain_crdt::Error),
     #[error("converged base for {note_id} has unsupported format {format}")]
     UnsupportedFormat {
         /// The note whose record could not be read.
@@ -110,6 +113,7 @@ pub enum SnapshotError {
 /// — see [`Self::save`].
 pub struct BaseSnapshotStore {
     workspace: WorkspaceRoot,
+    #[allow(dead_code)]
     directory: PathBuf,
 }
 
@@ -132,20 +136,11 @@ impl BaseSnapshotStore {
     /// treating it as absent would make the next external edit look like the
     /// note's first observation.
     pub fn load(&self, note_id: NoteId) -> Result<Option<BaseSnapshot>, SnapshotError> {
-        let path = self.record_path(note_id);
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(source) => return Err(SnapshotError::Io(source)),
-        };
-        let snapshot: BaseSnapshot = serde_json::from_slice(&bytes)?;
-        if snapshot.format != BASE_SNAPSHOT_FORMAT {
-            return Err(SnapshotError::UnsupportedFormat {
-                note_id,
-                format: snapshot.format,
-            });
-        }
-        Ok(Some(snapshot))
+        Ok(
+            secondbrain_crdt::NoteStore::new(self.workspace.canonical_path())
+                .load(note_id)?
+                .map(base_snapshot),
+        )
     }
 
     /// Every converged base this workspace has recorded, ordered by path.
@@ -163,35 +158,13 @@ impl BaseSnapshotStore {
     /// the reason [`Self::load`] gives: a caller told "this note has no base"
     /// would treat its next edit as the note's first observation.
     pub fn list(&self) -> Result<Vec<BaseSnapshot>, SnapshotError> {
-        let entries = match fs::read_dir(&self.directory) {
-            Ok(entries) => entries,
-            // A workspace that has converged nothing has no directory yet, and
-            // that is an empty roster rather than a failure.
-            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => return Err(SnapshotError::Io(source)),
-        };
-        let mut snapshots = Vec::new();
-        for entry in entries {
-            let path = entry?.path();
-            // A file this store did not write is not a record it may read.
-            let Some(note_id) = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .and_then(|stem| stem.parse::<NoteId>().ok())
-            else {
-                continue;
-            };
-            if let Some(snapshot) = self.load(note_id)? {
-                snapshots.push(snapshot);
-            }
-        }
-        snapshots.sort_by(|left, right| {
-            left.path
-                .as_str()
-                .cmp(right.path.as_str())
-                .then_with(|| left.note_id.to_string().cmp(&right.note_id.to_string()))
-        });
-        Ok(snapshots)
+        Ok(
+            secondbrain_crdt::NoteStore::new(self.workspace.canonical_path())
+                .list()?
+                .into_iter()
+                .map(base_snapshot)
+                .collect(),
+        )
     }
 
     /// Records `source` as the converged base of `note_id` at `version`, and
@@ -228,33 +201,16 @@ impl BaseSnapshotStore {
         version: NoteVersion,
         source: &str,
     ) -> Result<BaseSnapshot, SnapshotError> {
-        let snapshot = BaseSnapshot {
-            format: BASE_SNAPSHOT_FORMAT.to_owned(),
-            note_id,
-            path: path.clone(),
-            version,
-            source_hash: ContentHash::digest(source.as_bytes()),
-            source: source.to_owned(),
-        };
         let fingerprint = SourceDocument::parse(source)?.semantic_fingerprint();
-        let bytes = serde_json::to_vec_pretty(&snapshot)?;
-        fs::create_dir_all(&self.directory)?;
-        // The record lives under `.secondbrain/`, which `WorkspacePath` rejects,
-        // so it is written through the atomic-write helper directly — the same
-        // route the identity map takes.
-        crate::atomic_write::atomic_write(&self.record_path(note_id), &bytes)?;
-        // The base is written first: a crash between the two leaves a record
-        // describing the note's previous content, which is the state every
-        // build before this one was permanently in — recoverable, and repaired
-        // by the next convergence. A refreshed record with no base behind it
-        // would be evidence for a state nothing recorded.
+        let state = secondbrain_crdt::NoteStore::new(self.workspace.canonical_path())
+            .save(note_id, path, version, source)?;
         crate::IdentityMap::record_convergence(
             &self.workspace,
             note_id,
-            snapshot.source_hash,
+            state.source_hash,
             fingerprint,
         )?;
-        Ok(snapshot)
+        Ok(base_snapshot(state))
     }
 
     /// Records `source` as the genesis base of `note_id` unless it has one.
@@ -304,18 +260,27 @@ impl BaseSnapshotStore {
         note_id: NoteId,
         path: &WorkspacePath,
     ) -> Result<Option<BaseSnapshot>, SnapshotError> {
-        let Some(mut snapshot) = self.load(note_id)? else {
-            return Ok(None);
-        };
-        if &snapshot.path == path {
-            return Ok(Some(snapshot));
-        }
-        snapshot.path = path.clone();
-        let bytes = serde_json::to_vec_pretty(&snapshot)?;
-        crate::atomic_write::atomic_write(&self.record_path(note_id), &bytes)?;
-        Ok(Some(snapshot))
+        Ok(
+            secondbrain_crdt::NoteStore::new(self.workspace.canonical_path())
+                .update_path(note_id, path)?
+                .map(base_snapshot),
+        )
     }
+}
 
+fn base_snapshot(state: secondbrain_crdt::NoteState) -> BaseSnapshot {
+    BaseSnapshot {
+        format: BASE_SNAPSHOT_FORMAT.to_owned(),
+        note_id: state.note_id,
+        path: state.path,
+        version: state.version,
+        source_hash: state.source_hash,
+        source: state.markdown,
+    }
+}
+
+#[cfg(test)]
+impl BaseSnapshotStore {
     fn record_path(&self, note_id: NoteId) -> PathBuf {
         self.directory.join(format!("{note_id}.json"))
     }
@@ -401,6 +366,7 @@ mod tests {
                 "# A\n",
             )
             .expect("save");
+        fs::create_dir_all(&store.directory).expect("canonical directory");
         fs::write(store.directory.join("notes.txt"), "not a record").expect("write foreign file");
 
         let listed = store.list().expect("list");
@@ -467,24 +433,28 @@ mod tests {
         let root = WorkspaceRoot::open(directory.path()).expect("root");
         let store = BaseSnapshotStore::new(&root);
         let note_id = NoteId::new();
-        store
-            .save(
-                note_id,
-                &WorkspacePath::new("notes/a.md").expect("path"),
-                NoteVersion::new(1),
-                "# Note\n",
-            )
-            .expect("save");
+        fs::create_dir_all(
+            store
+                .workspace
+                .canonical_path()
+                .join(".secondbrain/snapshots"),
+        )
+        .expect("legacy snapshot directory");
         let path = store.record_path(note_id);
-        let mut record: serde_json::Value =
-            serde_json::from_slice(&fs::read(&path).expect("read")).expect("json");
-        record["format"] = serde_json::Value::from("sb-base-snapshot-v2");
+        let record = serde_json::json!({
+            "format": "sb-base-snapshot-v2",
+            "note_id": note_id,
+            "path": WorkspacePath::new("notes/a.md").expect("path"),
+            "version": NoteVersion::new(1),
+            "source_hash": ContentHash::digest(b"# Note\n"),
+            "source": "# Note\n"
+        });
         fs::write(&path, serde_json::to_vec(&record).expect("encode")).expect("write");
 
         let error = store.load(note_id).expect_err("unsupported format");
 
         assert!(
-            matches!(&error, SnapshotError::UnsupportedFormat { format, .. }
+            matches!(&error, SnapshotError::Crdt(secondbrain_crdt::Error::UnsupportedFormat { format, .. })
                 if format == "sb-base-snapshot-v2"),
             "{error}"
         );
