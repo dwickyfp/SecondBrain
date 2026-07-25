@@ -369,6 +369,234 @@ fn ambiguous_recovery_returns_needs_review() {
 }
 
 // ---------------------------------------------------------------------------
+// 6b. A rename and a copy are told apart by the workspace scan
+// ---------------------------------------------------------------------------
+//
+// Both present the same evidence — same fingerprint, same hash, a path no
+// record claims — so nothing in the bytes separates them. What does is whether
+// the file the matched record describes is still on disk, which only a caller
+// that walked the workspace can say.
+
+/// Every path in a scan, as `resolve_in_scan` wants them.
+fn scan(paths: &[&str]) -> std::collections::BTreeSet<WorkspacePath> {
+    paths
+        .iter()
+        .map(|path| WorkspacePath::new(path).expect("path"))
+        .collect()
+}
+
+#[test]
+fn a_scan_that_finds_the_original_gone_resolves_the_move_and_records_it() {
+    let (_temp, root) = fresh_workspace();
+
+    let body = "# Moved Note\n\nThe bytes did not change; the path did.\n";
+    let (hash, fp) = fingerprint_of(body);
+    let old = WorkspacePath::new("Notes/old.md").expect("path");
+    let new = WorkspacePath::new("Notes/new.md").expect("path");
+
+    let mut map = IdentityMap::open(&root).expect("open map");
+    let original_id = map.register(&old, hash, fp).expect("register");
+
+    // The walk found the file at its new path and nothing at the old one.
+    let outcome = map
+        .resolve_in_scan(&new, hash, fp, &scan(&["Notes/new.md"]))
+        .expect("resolve in scan");
+
+    assert_eq!(
+        outcome,
+        RecoveryOutcome::Resolved(original_id),
+        "a note whose old path stands empty moved there; it was not copied"
+    );
+
+    // The record followed it, in this process and on disk.
+    for map in [map, IdentityMap::open(&root).expect("reopen map")] {
+        let record = map.lookup(&original_id).expect("lookup").expect("record");
+        assert_eq!(record.current_path, new);
+        assert!(record.historical_paths.contains(&old));
+        assert!(record.historical_paths.contains(&new));
+        assert_eq!(
+            map.note_at(&old),
+            None,
+            "no record may go on claiming a path that holds no file"
+        );
+        assert_eq!(map.note_at(&new), Some(original_id));
+    }
+}
+
+#[test]
+fn a_scan_that_finds_the_original_still_there_keeps_the_copy_a_duplicate() {
+    let (_temp, root) = fresh_workspace();
+
+    let body = "# Copied Note\n\nBoth files exist.\n";
+    let (hash, fp) = fingerprint_of(body);
+    let original = WorkspacePath::new("Notes/original.md").expect("path");
+    let copy = WorkspacePath::new("Notes/copy.md").expect("path");
+
+    let mut map = IdentityMap::open(&root).expect("open map");
+    let original_id = map.register(&original, hash, fp).expect("register");
+
+    let outcome = map
+        .resolve_in_scan(
+            &copy,
+            hash,
+            fp,
+            &scan(&["Notes/original.md", "Notes/copy.md"]),
+        )
+        .expect("resolve in scan");
+
+    match outcome {
+        RecoveryOutcome::Duplicate {
+            existing_id,
+            existing_path,
+        } => {
+            assert_eq!(existing_id, original_id);
+            assert_eq!(existing_path, original);
+        }
+        other => panic!("a file whose original is still on disk is a copy: {other:?}"),
+    }
+    assert_eq!(
+        map.note_at(&original),
+        Some(original_id),
+        "the original's record must still claim the path it still occupies"
+    );
+}
+
+#[test]
+fn two_notes_that_both_vacated_and_read_alike_stay_ambiguous() {
+    let (_temp, root) = fresh_workspace();
+
+    let body = "# Twin Note\n\nIndistinguishable.\n";
+    let (hash, fp) = fingerprint_of(body);
+    let a = WorkspacePath::new("Notes/a.md").expect("path");
+    let b = WorkspacePath::new("Notes/b.md").expect("path");
+    let c = WorkspacePath::new("Notes/c.md").expect("path");
+
+    let mut map = IdentityMap::open(&root).expect("open map");
+    let id_a = map.register(&a, hash, fp).expect("register a");
+    let id_b = map.register(&b, hash, fp).expect("register b");
+
+    // Both recorded paths stand empty and both match this file exactly, so
+    // either could be the note that moved here.
+    let outcome = map
+        .resolve_in_scan(&c, hash, fp, &scan(&["Notes/c.md"]))
+        .expect("resolve in scan");
+
+    match outcome {
+        RecoveryOutcome::NeedsReview { mut candidates } => {
+            candidates.sort_by_key(ToString::to_string);
+            let mut expected = vec![id_a, id_b];
+            expected.sort_by_key(ToString::to_string);
+            assert_eq!(
+                candidates, expected,
+                "naming one of two equal matches would be a guess, not a resolution"
+            );
+        }
+        other => panic!("expected NeedsReview, got {other:?}"),
+    }
+    assert_eq!(
+        map.note_at(&a),
+        Some(id_a),
+        "an unresolved file moves nothing"
+    );
+    assert_eq!(map.note_at(&b), Some(id_b));
+}
+
+#[test]
+fn a_file_found_where_its_record_already_says_it_is_leaves_the_record_alone() {
+    let (_temp, root) = fresh_workspace();
+
+    let body = "# Settled Note\n\nNothing happened here.\n";
+    let (hash, fp) = fingerprint_of(body);
+    let path = WorkspacePath::new("Notes/settled.md").expect("path");
+
+    let mut map = IdentityMap::open(&root).expect("open map");
+    let id = map.register(&path, hash, fp).expect("register");
+    let record_path = root
+        .canonical_path()
+        .join(".secondbrain")
+        .join("identity-map")
+        .join(format!("{id}.json"));
+    let before = fs::read_to_string(&record_path).expect("read record");
+
+    let outcome = map
+        .resolve_in_scan(&path, hash, fp, &scan(&["Notes/settled.md"]))
+        .expect("resolve in scan");
+
+    assert_eq!(outcome, RecoveryOutcome::Resolved(id));
+    assert_eq!(
+        fs::read_to_string(&record_path).expect("read record"),
+        before,
+        "a note that did not move has no move to record"
+    );
+    let record = map.lookup(&id).expect("lookup").expect("record");
+    assert_eq!(record.current_path, path);
+    assert_eq!(
+        record.historical_paths.len(),
+        1,
+        "a path history must not grow on a rebuild that saw no move: {record:?}"
+    );
+}
+
+#[test]
+fn a_move_recovered_from_the_fingerprint_alone_also_stops_claiming_the_old_path() {
+    let (_temp, root) = fresh_workspace();
+
+    // A rename that also edited the body, in the one shape this fingerprint can
+    // still recognize: the structure and every byte span survived the edit, so
+    // the fingerprint matches and the hash does not. Resolving that has always
+    // been the rule; what was missing is that the record went on naming a path
+    // the file had left.
+    let before = "# Drifted Note\n\nStable content.\n";
+    let after = "# Drifted Note\n\nStabbb content.\n";
+    let (old_hash, old_fp) = fingerprint_of(before);
+    let (new_hash, new_fp) = fingerprint_of(after);
+    assert_eq!(
+        (old_fp.lo, old_fp.hi),
+        (new_fp.lo, new_fp.hi),
+        "this case only exists while the fingerprint hashes spans, not text"
+    );
+    assert_ne!(old_hash, new_hash);
+
+    let old = WorkspacePath::new("Notes/old.md").expect("path");
+    let new = WorkspacePath::new("Notes/new.md").expect("path");
+    let mut map = IdentityMap::open(&root).expect("open map");
+    let original_id = map.register(&old, old_hash, old_fp).expect("register");
+
+    let outcome = map
+        .resolve_in_scan(&new, new_hash, new_fp, &scan(&["Notes/new.md"]))
+        .expect("resolve in scan");
+
+    assert_eq!(outcome, RecoveryOutcome::Resolved(original_id));
+    let record = map.lookup(&original_id).expect("lookup").expect("record");
+    assert_eq!(record.current_path, new);
+    assert!(record.historical_paths.contains(&old));
+    assert_eq!(map.note_at(&old), None);
+}
+
+#[test]
+fn a_caller_that_cannot_see_the_workspace_still_reads_an_exact_match_as_a_copy() {
+    let (_temp, root) = fresh_workspace();
+
+    // The same situation as the rename case above — the original is gone —
+    // asked of the entry point that is handed one file and knows nothing else.
+    // It must not guess a move it has no evidence for.
+    let body = "# Single File\n\nOne event, no scan.\n";
+    let (hash, fp) = fingerprint_of(body);
+    let old = WorkspacePath::new("Notes/old.md").expect("path");
+    let new = WorkspacePath::new("Notes/new.md").expect("path");
+
+    let mut map = IdentityMap::open(&root).expect("open map");
+    let original_id = map.register(&old, hash, fp).expect("register");
+
+    let outcome = map.resolve_identity(&new, hash, fp).expect("resolve");
+
+    match outcome {
+        RecoveryOutcome::Duplicate { existing_id, .. } => assert_eq!(existing_id, original_id),
+        other => panic!("expected Duplicate from the single-file caller, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 7. Interrupted identity-map write preserves previous map
 // ---------------------------------------------------------------------------
 

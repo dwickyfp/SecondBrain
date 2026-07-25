@@ -16,10 +16,16 @@
 //!    or appears in `historical_paths`, the record's ID is returned.
 //! 2. **Exact match at same path**: if the structural fingerprint and content
 //!    hash match a record at the *same* path, the record's ID is returned.
-//! 3. **Exact match at different path (duplicate)**: if the fingerprint and
-//!    hash match a record at a *different* path (with no path match),
-//!    [`RecoveryOutcome::Duplicate`] is returned. If multiple records match
-//!    (pre-existing duplicates), the first match is returned as Duplicate.
+//! 3. **Exact match at different path (rename or duplicate)**: if the
+//!    fingerprint and hash match a record at a *different* path (with no path
+//!    match), the file is either a copy of that note or that note having moved.
+//!    The bytes cannot tell those apart, so the answer depends on what the
+//!    caller can say about the workspace — see [`IdentityMap::resolve_in_scan`].
+//!    [`IdentityMap::resolve_identity`], which is asked about one file and
+//!    knows nothing of the rest of the workspace, takes the conservative
+//!    reading and returns [`RecoveryOutcome::Duplicate`]. If multiple records
+//!    match (pre-existing duplicates), the first match is returned as
+//!    Duplicate.
 //! 4. **Fingerprint-only match (rename with body change)**: if the structural
 //!    fingerprint matches but the content hash differs (body text changed but
 //!    structure preserved) and there is no exact match, the record's ID is
@@ -259,6 +265,11 @@ impl IdentityMap {
     /// Resolves the stable identity for a file at `path` with the given hash
     /// and fingerprint.
     ///
+    /// The caller is asked about one file and says nothing about the rest of
+    /// the workspace, so an exact match at another path is read conservatively
+    /// as a copy. A caller that has just walked the whole workspace can do
+    /// better and should use [`Self::resolve_in_scan`].
+    ///
     /// See the module-level documentation for the resolution strategy.
     ///
     /// # Errors
@@ -269,6 +280,81 @@ impl IdentityMap {
         path: &WorkspacePath,
         hash: ContentHash,
         fingerprint: secondbrain_markdown::Fingerprint,
+    ) -> Result<RecoveryOutcome> {
+        self.classify(path, hash, fingerprint, None)
+    }
+
+    /// Resolves the identity of a file seen during a walk of the whole
+    /// workspace, recording the move when the resolution is one.
+    ///
+    /// `present` is every note path the caller found in that walk. It is what
+    /// separates a rename from a copy, which nothing in the bytes can: both
+    /// present as the same fingerprint and hash at a path no record claims, and
+    /// the only difference is whether the file the matched record describes is
+    /// still there. If it is, the new file is a second copy of that note and
+    /// must be told apart from it. If it is gone, the note moved, and its
+    /// identity has to move with it — forking instead would leave the note's
+    /// backlinks, converged base and journal attached to a record claiming a
+    /// path nothing occupies.
+    ///
+    /// The map cannot learn this on its own without walking a workspace it does
+    /// not own and cannot scope, so the caller that just walked it says. The
+    /// rule for what to do with the answer stays here: a caller that decided
+    /// for itself when an identity may move would be writing identity policy.
+    ///
+    /// The record is rewritten only when the note really did move — a file
+    /// found where its record already says it is costs no write.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on I/O failure, or if the moved record cannot be
+    /// written.
+    pub fn resolve_in_scan(
+        &mut self,
+        path: &WorkspacePath,
+        hash: ContentHash,
+        fingerprint: secondbrain_markdown::Fingerprint,
+        present: &BTreeSet<WorkspacePath>,
+    ) -> Result<RecoveryOutcome> {
+        let outcome = self.classify(path, hash, fingerprint, Some(present))?;
+        if let RecoveryOutcome::Resolved(note_id) = outcome
+            && self.has_moved_to(note_id, path, present)
+        {
+            self.update_path(&note_id, path)?;
+        }
+        Ok(outcome)
+    }
+
+    /// Whether `note_id`'s record describes a note that has moved to `path`.
+    ///
+    /// A move is the record naming some *other* path, and that path standing
+    /// empty. A record whose path is still occupied describes a file that is
+    /// still there, so whatever resolved to it here — a path this note once
+    /// held, most often — is not that note relocating, and rewriting the record
+    /// would point it away from a file that exists.
+    fn has_moved_to(
+        &self,
+        note_id: NoteId,
+        path: &WorkspacePath,
+        present: &BTreeSet<WorkspacePath>,
+    ) -> bool {
+        self.records
+            .iter()
+            .find(|record| record.note_id == note_id)
+            .is_some_and(|record| {
+                &record.current_path != path && !present.contains(&record.current_path)
+            })
+    }
+
+    /// The resolution strategy itself, shared by both entry points.
+    ///
+    /// `present` is `None` when the caller cannot say which paths hold a file.
+    fn classify(
+        &self,
+        path: &WorkspacePath,
+        hash: ContentHash,
+        fingerprint: secondbrain_markdown::Fingerprint,
+        present: Option<&BTreeSet<WorkspacePath>>,
     ) -> Result<RecoveryOutcome> {
         let fp_lo = fingerprint.lo;
         let fp_hi = fingerprint.hi;
@@ -332,12 +418,32 @@ impl IdentityMap {
             return Ok(RecoveryOutcome::NeedsReview { candidates });
         }
 
-        // --- Priority (c): Exact match at DIFFERENT path (Duplicate) ---
-        // Same fingerprint + same hash but at a different path with no path
-        // match → this is a duplicate copy of an existing note. If multiple
-        // records match (pre-existing duplicates), return the first match as
-        // Duplicate — the new file is still a copy of an existing note.
+        // --- Priority (c): Exact match at DIFFERENT path (rename or copy) ---
+        // Same fingerprint + same hash at a different path with no path match.
+        // This is either a copy of that note or that note having moved, and the
+        // content is the same either way. A caller that walked the workspace
+        // can say which: a record whose path no longer holds a file describes a
+        // note that moved, and only a note that moved can have moved here.
         if !exact_at_different_path.is_empty() {
+            let vacated: Vec<&IdentityRecord> = exact_at_different_path
+                .iter()
+                .copied()
+                .filter(|record| present.is_some_and(|paths| !paths.contains(&record.current_path)))
+                .collect();
+            // Several notes that all moved and all read alike are matched by
+            // this file equally well, and naming one would be a guess dressed
+            // as a resolution.
+            if vacated.len() > 1 {
+                let candidates: Vec<NoteId> = vacated.iter().map(|r| r.note_id).collect();
+                return Ok(RecoveryOutcome::NeedsReview { candidates });
+            }
+            if let [moved] = vacated[..] {
+                return Ok(RecoveryOutcome::Resolved(moved.note_id));
+            }
+            // Every match is a file that is still where its record says. None
+            // of them moved, so this is a copy of one of them. If several
+            // match (pre-existing duplicates), the first is named — the new
+            // file is a copy of an existing note either way.
             let r = exact_at_different_path[0];
             return Ok(RecoveryOutcome::Duplicate {
                 existing_id: r.note_id,
@@ -482,13 +588,6 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let year = if m <= 2 { y + 1 } else { y };
     (year, m, d)
-}
-
-// Suppress unused import warning for BTreeSet — it may be useful in future
-// extensions but is not currently used.
-#[allow(dead_code)]
-fn _ensure_btree_set_linked() -> BTreeSet<u64> {
-    BTreeSet::new()
 }
 
 #[cfg(test)]

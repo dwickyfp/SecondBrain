@@ -174,6 +174,34 @@ fn note_id_of(vault: &Vault, path: &str) -> NoteId {
         .expect("a canonical note id")
 }
 
+/// Every note id the workspace has filed durable state under, deduplicated and
+/// in deterministic order.
+///
+/// A forked identity is precisely a note id nobody asked for, so the honest way
+/// to say a note did not fork is to name every id the workspace knows — its
+/// identity record, its converged base and its journal alike, read from the
+/// record files rather than from the index that is derived from them.
+fn tracked_ids(vault: &Vault) -> Vec<String> {
+    let mut ids = Vec::new();
+    for directory in ["identity-map", "snapshots", "oplog"] {
+        let Ok(entries) = fs::read_dir(vault.path().join(".secondbrain").join(directory)) else {
+            // A workspace that has journaled nothing has no oplog directory,
+            // and that is a workspace with no ids filed there.
+            continue;
+        };
+        for entry in entries {
+            let path = entry.expect("directory entry").path();
+            let name = path.file_stem().expect("a named entry").to_string_lossy();
+            if let Ok(id) = name.parse::<NoteId>() {
+                ids.push(id.to_string());
+            }
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// Derives a plan turning `ALPHA` into `contents`, and returns the plan file.
 ///
 /// Both the incoming file and the plan live in the scratch directory outside
@@ -390,6 +418,136 @@ fn index_rebuild_reports_what_it_indexed() {
     assert_eq!(code, OK, "{report}");
     assert_eq!(report["indexed"], 2);
     assert_eq!(report["broken_links"], 0);
+}
+
+/// A note renamed outside the workspace keeps its identity across a rebuild.
+///
+/// A rename and a copy are the same bytes at a path no record claims, so the
+/// content alone cannot tell them apart. Guessing "copy" mints a second
+/// identity for one note and leaves the first record claiming a path nothing
+/// occupies — and the note's backlinks, converged base and journal all stay
+/// with the dead identity, so the file the operator can still open becomes a
+/// stranger to its own history.
+///
+/// The move keeps the file stem, so `[[beta]]` still names this note: what is
+/// under test is the identity of the file, not link rewriting.
+#[test]
+fn a_rebuild_after_an_external_rename_moves_the_note_rather_than_forking_it() {
+    let vault = Vault::indexed();
+    let beta = note_id_of(&vault, BETA);
+    let known_before = tracked_ids(&vault);
+    let moved = "archive/beta.md";
+    fs::create_dir_all(vault.path().join("archive")).expect("create directory");
+    fs::rename(vault.path().join(BETA), vault.path().join(moved))
+        .expect("an external tool renames the note");
+
+    let (code, report) = run_json(&["index", "rebuild", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(report["indexed"], 2, "{report}");
+    assert_eq!(
+        tracked_ids(&vault),
+        known_before,
+        "one note that moved is one note: a rebuild may not mint a second \
+         identity, nor file a base or a journal under one"
+    );
+
+    let (code, inspected) = run_json(&["note", "inspect", vault.arg(), moved]);
+    assert_eq!(code, OK, "{inspected}");
+    assert_eq!(
+        inspected["note_id"],
+        beta.to_string(),
+        "the identity has to follow the bytes: {inspected}"
+    );
+    let backlinks = inspected["backlinks"].as_array().expect("backlinks");
+    assert_eq!(backlinks.len(), 1, "{inspected}");
+    assert_eq!(
+        backlinks[0]["path"], ALPHA,
+        "the link that pointed at this note must still arrive — losing it is \
+         what a forked identity costs an operator: {inspected}"
+    );
+
+    // The record now describes where the file actually is.
+    let root = vault.root();
+    let map = secondbrain_vault::IdentityMap::open(&root).expect("identity map");
+    let record = map
+        .lookup(&beta)
+        .expect("look the record up")
+        .expect("the note kept its record");
+    assert_eq!(record.current_path.as_str(), moved, "{record:?}");
+    assert!(
+        record
+            .historical_paths
+            .contains(&WorkspacePath::new(BETA).expect("path")),
+        "the path the note came from is history, not a claim: {record:?}"
+    );
+    assert_eq!(
+        map.note_at(&WorkspacePath::new(BETA).expect("path")),
+        None,
+        "no record may go on claiming a path that holds no file"
+    );
+
+    // The derived state the identity anchors came with it.
+    let base = secondbrain_vault::BaseSnapshotStore::new(&root)
+        .load(beta)
+        .expect("load the converged base")
+        .expect("the note kept the base it converged at");
+    assert_eq!(base.source, BETA_SOURCE, "{base:?}");
+
+    // And not one byte of a note was rewritten to achieve any of it.
+    assert_eq!(
+        (vault.read(moved), vault.read(ALPHA)),
+        (BETA_SOURCE.to_owned(), ALPHA_SOURCE.to_owned()),
+        "recovering an identity is workspace state; it may not touch a note"
+    );
+}
+
+/// A copy is still a copy: the second file is a second note.
+///
+/// This is the other half of the rename rule and the reason it needs the
+/// workspace scan. The evidence is identical — same fingerprint, same hash, a
+/// path no record claims — and only the original file still being on disk says
+/// this is a fork rather than a move.
+#[test]
+fn a_rebuild_after_an_external_copy_gives_the_copy_its_own_identity() {
+    let vault = Vault::indexed();
+    let beta = note_id_of(&vault, BETA);
+    let copied = "archive/beta.md";
+    fs::create_dir_all(vault.path().join("archive")).expect("create directory");
+    fs::copy(vault.path().join(BETA), vault.path().join(copied))
+        .expect("an external tool copies the note");
+
+    let (code, report) = run_json(&["index", "rebuild", vault.arg()]);
+
+    assert_eq!(code, OK, "{report}");
+    assert_eq!(report["indexed"], 3, "{report}");
+    assert_eq!(
+        note_id_of(&vault, BETA),
+        beta,
+        "the file that never moved keeps the identity it had"
+    );
+    let duplicate = note_id_of(&vault, copied);
+    assert_ne!(
+        duplicate, beta,
+        "two files that both exist are two notes, however alike their bytes"
+    );
+
+    let root = vault.root();
+    let map = secondbrain_vault::IdentityMap::open(&root).expect("identity map");
+    assert_eq!(
+        map.note_at(&WorkspacePath::new(BETA).expect("path")),
+        Some(beta),
+        "the original's record must still claim the path it still occupies"
+    );
+    assert_eq!(
+        map.note_at(&WorkspacePath::new(copied).expect("path")),
+        Some(duplicate)
+    );
+    assert_eq!(
+        (vault.read(BETA), vault.read(copied)),
+        (BETA_SOURCE.to_owned(), BETA_SOURCE.to_owned()),
+        "indexing a copy may not touch either file"
+    );
 }
 
 #[test]

@@ -264,6 +264,11 @@ fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
         message: error.to_string(),
     })?;
     let bases = BaseSnapshotStore::new(&workspace);
+    // Every note this scan found, including the ones whose identity came from
+    // their own frontmatter: what the identity map needs is which recorded
+    // paths still hold a file, and a note declaring its own id occupies its
+    // path exactly as much as one that does not.
+    let present: BTreeSet<WorkspacePath> = notes.iter().map(|note| note.path.clone()).collect();
     for note in notes {
         if note.id.is_some() {
             // The identity came from the note's own frontmatter, so nothing
@@ -275,8 +280,11 @@ fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
         }
         let hash = ContentHash::digest(note.source.as_bytes());
         let fingerprint = note.document.semantic_fingerprint();
+        // Resolved against the scan rather than the file alone: a rebuild is
+        // the one caller that knows which recorded paths still hold a file, and
+        // that is what tells a note that moved from a note that was copied.
         let outcome = map
-            .resolve_identity(&note.path, hash, fingerprint)
+            .resolve_in_scan(&note.path, hash, fingerprint, &present)
             .map_err(|error| IndexError::Identity {
                 path: note.path.to_string(),
                 message: error.to_string(),
