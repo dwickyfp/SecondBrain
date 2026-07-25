@@ -84,6 +84,40 @@ impl fmt::Display for AbandonedReason {
     }
 }
 
+/// A read-only view of one durable transaction marker.
+///
+/// Enough to answer "what is this workspace's transaction state" without
+/// exposing the marker schema itself, which only [`crate::engine`] and
+/// [`crate::recovery`] may write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransactionSummary {
+    /// The transaction this marker belongs to.
+    pub transaction_id: TransactionId,
+    /// The note the transaction edits.
+    pub note_id: NoteId,
+    /// The note's path at the time the marker was written.
+    pub path: WorkspacePath,
+    /// The durable state label, one of `PREPARED`, `OPERATIONS_DURABLE`,
+    /// `MATERIALIZING`, `COMMITTED`, or `ABORTED`.
+    pub state: String,
+    /// Whether the derived index has been refreshed for this transaction.
+    pub index_repaired: bool,
+}
+
+impl TransactionSummary {
+    /// Whether this transaction has reached a state recovery will not revisit.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        self.state == "COMMITTED" || self.state == "ABORTED"
+    }
+
+    /// Whether this transaction is committed but its index repair is still owed.
+    #[must_use]
+    pub fn awaits_index_repair(&self) -> bool {
+        self.state == "COMMITTED" && !self.index_repaired
+    }
+}
+
 impl TransactionEngine {
     /// Recover all durable transaction markers in deterministic filename order.
     pub fn recover(&self) -> Result<Vec<RecoveryAction>, TransactionError> {
@@ -191,6 +225,81 @@ impl TransactionEngine {
             persist_marker(&marker_path, &marker)?;
         }
         Ok(actions)
+    }
+
+    /// Records that the derived index now reflects every committed transaction
+    /// of `note_id`.
+    ///
+    /// The engine never sets `index_repaired` itself: it holds no index, so a
+    /// marker it wrote claiming the repair had happened would be a marker that
+    /// lies, and [`Self::recover`] skips committed markers that claim it — so
+    /// the repair would be owed by nobody and performed by nobody. The caller
+    /// that actually refreshed the index says so here, and a caller that could
+    /// not leaves the flag clear so recovery asks for the repair later.
+    ///
+    /// Markers that are not committed are left alone: the flag only means
+    /// anything once there is a committed version for the index to reflect.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a marker cannot be read, parsed, or rewritten.
+    pub fn record_index_refreshed(&self, note_id: NoteId) -> Result<(), TransactionError> {
+        for marker_path in self.marker_paths()? {
+            let mut marker: DurableState = serde_json::from_slice(&fs::read(&marker_path)?)?;
+            if marker.note_id != note_id || marker.state != "COMMITTED" || marker.index_repaired {
+                continue;
+            }
+            marker.index_repaired = true;
+            persist_marker(&marker_path, &marker)?;
+        }
+        Ok(())
+    }
+
+    /// Every durable transaction marker in the workspace, in deterministic
+    /// order, as a read-only summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a marker cannot be read or parsed.
+    pub fn transactions(&self) -> Result<Vec<TransactionSummary>, TransactionError> {
+        let mut summaries = Vec::new();
+        for marker_path in self.marker_paths()? {
+            let marker: DurableState = serde_json::from_slice(&fs::read(&marker_path)?)?;
+            summaries.push(TransactionSummary {
+                transaction_id: marker.transaction_id,
+                note_id: marker.note_id,
+                path: marker.path,
+                state: marker.state,
+                index_repaired: marker.index_repaired,
+            });
+        }
+        Ok(summaries)
+    }
+
+    /// Every review descriptor still awaiting a human, in deterministic order.
+    ///
+    /// A descriptor is filed when a change cannot be integrated without someone
+    /// deciding what it meant, and it stays on disk until they do; nothing
+    /// clears it automatically. Counting them is therefore how a diagnostic
+    /// reports that the workspace is waiting on a person.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction directory cannot be read.
+    pub fn pending_reviews(&self) -> Result<Vec<PathBuf>, TransactionError> {
+        let directory = paths::transactions_dir(self.workspace.canonical_path());
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        let mut descriptors = Vec::new();
+        for entry in fs::read_dir(&directory)? {
+            let path = entry?.path();
+            if paths::is_review_descriptor(&path) {
+                descriptors.push(path);
+            }
+        }
+        descriptors.sort();
+        Ok(descriptors)
     }
 
     /// Transactions of one note whose operations are journaled but whose

@@ -1,0 +1,31 @@
+[package]
+name = "secondbrain-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "secondbrain"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+secondbrain-core = { path = "../secondbrain-core" }
+secondbrain-index = { path = "../secondbrain-index" }
+secondbrain-markdown = { path = "../secondbrain-markdown" }
+secondbrain-transaction = { path = "../secondbrain-transaction" }
+secondbrain-vault = { path = "../secondbrain-vault" }
+serde.workspace = true
+serde_json = "1.0.149"
+thiserror.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2.0.17"
+predicates = "3.1.3"
+secondbrain-core = { path = "../secondbrain-core" }
+secondbrain-markdown = { path = "../secondbrain-markdown" }
+secondbrain-transaction = { path = "../secondbrain-transaction" }
+secondbrain-vault = { path = "../secondbrain-vault" }
+serde_json = "1.0.149"
+tempfile.workspace = true

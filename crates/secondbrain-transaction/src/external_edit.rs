@@ -320,6 +320,11 @@ impl<R: IndexRefresh> ExternalEditCoordinator<R> {
             },
         };
         self.index.refresh(note_id, path)?;
+        // The refresh actually happened, so the markers this integration wrote
+        // may now say so. Recording it here rather than in the engine is what
+        // keeps the flag honest: if the refresh above had failed, this line is
+        // never reached and recovery asks for the repair instead.
+        self.engine.record_index_refreshed(note_id)?;
         Ok(outcome)
     }
 

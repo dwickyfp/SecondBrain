@@ -50,6 +50,22 @@ pub fn is_marker(path: &Path) -> bool {
         .is_some_and(|stem| stem.parse::<TransactionId>().is_ok())
 }
 
+/// Whether `path` names a review descriptor rather than a marker.
+///
+/// The counterpart to [`is_marker`], stated here for the same reason: anything
+/// that has to tell the two apart while reading the shared directory asks
+/// rather than re-deriving `<id>.conflict.json` for itself.
+#[must_use]
+pub fn is_review_descriptor(path: &Path) -> bool {
+    if path.extension().and_then(|value| value.to_str()) != Some("json") {
+        return false;
+    }
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(|stem| stem.strip_suffix(".conflict"))
+        .is_some_and(|stem| stem.parse::<TransactionId>().is_ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,6 +79,14 @@ mod tests {
         assert!(
             !is_marker(&review_descriptor_path(root, transaction_id)),
             "a descriptor parsed as a marker would fail a whole recovery pass"
+        );
+        assert!(is_review_descriptor(&review_descriptor_path(
+            root,
+            transaction_id
+        )));
+        assert!(
+            !is_review_descriptor(&marker_path(root, transaction_id)),
+            "a marker counted as a pending review would report a human is needed when none is"
         );
     }
 

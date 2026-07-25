@@ -55,6 +55,49 @@ struct Note {
     id: Option<NoteId>,
 }
 
+/// The internal directory name that owns the derived index.
+const INTERNAL_DIR: &str = ".secondbrain";
+
+/// The derived SQLite index file name inside the internal directory.
+const INDEX_FILE: &str = "index.sqlite";
+
+/// The SQLite file the derived index of the workspace at `root` lives in.
+///
+/// Stated here because this crate owns the file, so that callers that must
+/// open, dump, or check for it — the CLI among them — ask rather than restate
+/// a path that only this crate gets to choose.
+#[must_use]
+pub fn index_path(root: impl AsRef<Path>) -> PathBuf {
+    root.as_ref().join(INTERNAL_DIR).join(INDEX_FILE)
+}
+
+/// Every Markdown note in the workspace at `root`, in deterministic order.
+///
+/// This applies exactly the rules [`rebuild`] applies — the same internal and
+/// excluded directories, the same file extensions — because it runs the same
+/// scan. A caller that wants to inspect notes without building an index, such
+/// as workspace validation, asks here rather than walking the tree itself and
+/// drifting from what the index considers a note.
+pub fn note_paths(
+    root: impl AsRef<Path>,
+    config: &IndexConfig,
+) -> Result<Vec<WorkspacePath>, IndexError> {
+    let root = root.as_ref();
+    let mut skipped = 0;
+    let mut files = Vec::new();
+    scan(root, root, config, &mut files, &mut skipped)?;
+    files.sort();
+    files
+        .into_iter()
+        .map(|(relative, _)| {
+            WorkspacePath::new(&relative).map_err(|error| IndexError::MalformedNote {
+                path: relative,
+                message: error.to_string(),
+            })
+        })
+        .collect()
+}
+
 pub fn rebuild(root: impl AsRef<Path>, config: &IndexConfig) -> Result<IndexReport, IndexError> {
     let root = root.as_ref();
     let mut skipped = 0;
@@ -99,13 +142,13 @@ pub fn rebuild(root: impl AsRef<Path>, config: &IndexConfig) -> Result<IndexRepo
     }
 
     establish_ids(root, &mut notes)?;
-    let internal = root.join(".secondbrain");
+    let internal = root.join(INTERNAL_DIR);
     fs::create_dir_all(&internal).map_err(|source| IndexError::Io {
         path: internal.clone(),
         source,
     })?;
-    let active = internal.join("index.sqlite");
-    let temporary = internal.join("index.sqlite.rebuild");
+    let active = index_path(root);
+    let temporary = internal.join(format!("{INDEX_FILE}.rebuild"));
     remove_sqlite_files(&temporary)?;
 
     let mut database = crate::IndexDatabase::open(&temporary).map_err(database_error)?;

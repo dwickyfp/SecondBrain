@@ -152,9 +152,12 @@ impl TransactionEngine {
         // operations a second time.
         self.record_converged_base(&request, version, &materialized)?;
         state.transition_to(TransactionState::Committed)?;
+        // `index_repaired` stays clear. The engine has no index — see
+        // [`Self::record_index_refreshed`] — so setting the flag here would
+        // claim work that has not happened, and recovery skips committed
+        // markers that claim it, which is exactly how the repair would be lost.
         self.persist_state(&request, state, version, materialized_hash, false)?;
         failpoint::hit("after_commit_before_index")?;
-        self.persist_state(&request, state, version, materialized_hash, true)?;
 
         Ok(CommitOutcome {
             changed: true,
@@ -243,13 +246,6 @@ impl TransactionEngine {
             version,
             actual_hash,
             false,
-        )?;
-        self.persist_state(
-            &request,
-            TransactionState::Committed,
-            version,
-            actual_hash,
-            true,
         )?;
 
         Ok(CommitOutcome {

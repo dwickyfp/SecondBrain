@@ -105,6 +105,33 @@ impl IndexDatabase {
         .collect()
     }
 
+    /// The note currently living at `path`, or `None` when the index holds no
+    /// such note.
+    ///
+    /// This is how a caller turns the path an operator typed into the note id
+    /// every other query takes. It deliberately answers from the index rather
+    /// than from the file's frontmatter: the index is where the rule about
+    /// which identity a file carries — declared id first, identity map
+    /// otherwise — was already applied, and asking the file again would restate
+    /// that rule somewhere it could drift.
+    pub fn note_by_path(&self, path: &str) -> Result<Option<NoteSummary>> {
+        let mut statement = self.connection().prepare(
+            "SELECT n.note_id,p.path,n.title FROM notes n
+             JOIN paths p ON p.note_id=n.note_id AND p.is_current=1
+             WHERE p.path=?1",
+        )?;
+        let mut rows = statement.query([path])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let id: String = row.get(0)?;
+        Ok(Some(NoteSummary {
+            note_id: parse_id(&id)?,
+            path: row.get(1)?,
+            title: row.get(2)?,
+        }))
+    }
+
     pub fn backlinks(&self, note: NoteId) -> Result<Vec<LinkHit>> {
         self.links_query(
             "SELECT n.note_id,p.path,n.title,l.target FROM links l
