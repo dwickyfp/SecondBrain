@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/secondbrain-core"]
+members = ["crates/secondbrain-core", "crates/secondbrain-vault"]
 resolver = "3"
 
 [workspace.package]
