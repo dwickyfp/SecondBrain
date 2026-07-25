@@ -224,10 +224,12 @@ fn reject_path_collisions(files: &[(String, PathBuf)]) -> Result<(), IndexError>
         if let Some(first) = portable.insert(key, relative.clone())
             && first != *relative
         {
-            return Err(IndexError::PathCollision {
-                first,
-                second: relative.clone(),
-            });
+            let (first, second) = if first < *relative {
+                (first, relative.clone())
+            } else {
+                (relative.clone(), first)
+            };
+            return Err(IndexError::PathCollision { first, second });
         }
     }
     Ok(())

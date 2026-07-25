@@ -1,9 +1,10 @@
+#![cfg(unix)]
+
 use std::{fs, path::Path};
 
 use crdt_spike_contract::{ContractError, Request, ScenarioCommand, invoke};
 use tempfile::tempdir;
 
-#[cfg(unix)]
 #[test]
 fn process_harness_rejects_incomplete_candidate_response() {
     use std::os::unix::fs::PermissionsExt;
