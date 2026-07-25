@@ -22,7 +22,7 @@ pub use engine::{CommitOutcome, TransactionEngine, TransactionError, Transaction
 pub use external_edit::{
     ExternalEditCoordinator, ExternalEditError, ExternalEditOutcome, IndexRefresh,
 };
-pub use recovery::{AbandonedReason, RecoveryAction, TransactionSummary};
+pub use recovery::{AbandonedReason, PendingReview, RecoveryAction, TransactionSummary};
 pub use state::{StateTransitionError, TransactionState};
 
 pub use record::{

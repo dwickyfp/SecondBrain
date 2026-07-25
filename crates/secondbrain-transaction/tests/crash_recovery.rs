@@ -46,6 +46,16 @@ fn real_process_crashes_recover_deterministically_at_every_boundary() {
         let engine =
             TransactionEngine::new(WorkspaceRoot::open(dir.path()).unwrap(), WorkspaceId::new());
         let first = engine.recover().unwrap();
+        // Recovery *asks* for the index repair; performing it belongs to
+        // whoever holds an index, and that caller says so afterwards. Driving
+        // idempotence through that form is the only honest way to assert it:
+        // a `recover()` that recorded the repair itself would be claiming work
+        // it cannot do, which is exactly the marker that lies.
+        for action in &first {
+            if let RecoveryAction::IndexRepair { note_id, .. } = action {
+                engine.record_index_refreshed(*note_id).unwrap();
+            }
+        }
         let second = engine.recover().unwrap();
         let markdown = fs::read_to_string(dir.path().join("notes/test.md")).unwrap();
 
@@ -65,6 +75,46 @@ fn real_process_crashes_recover_deterministically_at_every_boundary() {
             "recovery must be idempotent at {boundary}"
         );
     }
+}
+
+#[test]
+fn a_committed_transaction_keeps_owing_its_index_repair_until_a_caller_records_it() {
+    let dir = tempdir().unwrap();
+    support::crash_child::prepare_and_crash(dir.path(), "after_commit_before_index", false);
+    let engine =
+        TransactionEngine::new(WorkspaceRoot::open(dir.path()).unwrap(), WorkspaceId::new());
+
+    let asked = engine.recover().unwrap();
+    let note_id = asked
+        .iter()
+        .find_map(|action| match action {
+            RecoveryAction::IndexRepair { note_id, .. } => Some(*note_id),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected an index repair: {asked:?}"));
+
+    // The engine holds no index, so nothing has been refreshed. A pass that
+    // recorded the repair anyway would leave it owed by nobody and performed by
+    // nobody: this pass would skip the marker forever, and the caller whose
+    // rebuild failed would have no way to ask again.
+    let marker = fs::read_to_string(support::crash_child::transaction_path(dir.path())).unwrap();
+    assert!(
+        marker.contains("\"index_repaired\": false"),
+        "recovery claimed a repair it cannot perform: {marker}"
+    );
+    assert!(
+        engine
+            .recover()
+            .unwrap()
+            .iter()
+            .any(|action| matches!(action, RecoveryAction::IndexRepair { .. })),
+        "an unperformed repair must still be asked for"
+    );
+
+    // And once the caller that actually refreshed the index says so, the
+    // transaction is finished and recovery stops asking.
+    engine.record_index_refreshed(note_id).unwrap();
+    assert!(engine.recover().unwrap().is_empty());
 }
 
 #[test]

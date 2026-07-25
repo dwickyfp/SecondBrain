@@ -97,29 +97,72 @@ pub struct TransactionSummary {
     pub note_id: NoteId,
     /// The note's path at the time the marker was written.
     pub path: WorkspacePath,
-    /// The durable state label, one of `PREPARED`, `OPERATIONS_DURABLE`,
-    /// `MATERIALIZING`, `COMMITTED`, or `ABORTED`.
+    /// The durable state label exactly as the marker holds it, one of
+    /// `PREPARED`, `OPERATIONS_DURABLE`, `MATERIALIZING`, `COMMITTED`, or
+    /// `ABORTED` — carried for diagnostics that display it verbatim.
+    ///
+    /// Callers deciding anything ask the predicates below instead. The labels
+    /// are this crate's vocabulary, and a caller comparing the string would be
+    /// keeping a second copy of it that nothing stops from drifting.
     pub state: String,
     /// Whether the derived index has been refreshed for this transaction.
     pub index_repaired: bool,
 }
 
+/// One change still waiting on a person to decide what it meant.
+///
+/// Named by the transaction it is filed under rather than by the file it lives
+/// in, for the reason [`TransactionSummary`] exists: where these records sit
+/// and what they hold is this crate's to know, and handing a caller a
+/// filesystem path would make the layout — and the descriptor schema behind it
+/// — part of the API that only the coordinator may write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingReview {
+    /// The transaction the review is filed under.
+    pub transaction_id: TransactionId,
+}
+
 impl TransactionSummary {
+    /// Whether this transaction reached its commit marker.
+    #[must_use]
+    pub fn committed(&self) -> bool {
+        self.state == "COMMITTED"
+    }
+
+    /// Whether this transaction was aborted.
+    #[must_use]
+    pub fn aborted(&self) -> bool {
+        self.state == "ABORTED"
+    }
+
     /// Whether this transaction has reached a state recovery will not revisit.
+    ///
+    /// A label this build does not recognize is deliberately not terminal:
+    /// unfinished work is the safe reading, and it keeps the transaction
+    /// visible to whoever has to look at it.
     #[must_use]
     pub fn is_terminal(&self) -> bool {
-        self.state == "COMMITTED" || self.state == "ABORTED"
+        self.committed() || self.aborted()
     }
 
     /// Whether this transaction is committed but its index repair is still owed.
     #[must_use]
     pub fn awaits_index_repair(&self) -> bool {
-        self.state == "COMMITTED" && !self.index_repaired
+        self.committed() && !self.index_repaired
     }
 }
 
 impl TransactionEngine {
     /// Recover all durable transaction markers in deterministic filename order.
+    ///
+    /// A returned [`RecoveryAction::IndexRepair`] is a request, not a receipt:
+    /// this engine holds no index and cannot perform one. The caller that does
+    /// perform it calls [`Self::record_index_refreshed`] afterwards, and a
+    /// caller whose refresh failed calls nothing — so the repair is asked for
+    /// again on the next pass instead of being marked done by a marker that
+    /// lies. Recovery is therefore idempotent in that form, and only that form:
+    /// re-running it before the caller records the repair asks again, which is
+    /// the correct answer while the index is still stale.
     pub fn recover(&self) -> Result<Vec<RecoveryAction>, TransactionError> {
         let mut actions = Vec::new();
         for marker_path in self.marker_paths()? {
@@ -129,9 +172,10 @@ impl TransactionEngine {
             }
 
             if marker.state == "COMMITTED" {
+                // Nothing to persist: the marker already says what is true, and
+                // it keeps saying it until whoever refreshed the index says
+                // otherwise.
                 actions.push(index_repair(&marker));
-                marker.index_repaired = true;
-                persist_marker(&marker_path, &marker)?;
                 continue;
             }
 
@@ -210,6 +254,9 @@ impl TransactionEngine {
             };
 
             marker.state = "COMMITTED".to_owned();
+            // The repair stays owed, for the reason [`Self::recover`] gives:
+            // this pass converged the Markdown, and nothing here touched an
+            // index.
             marker.index_repaired = false;
             persist_marker(&marker_path, &marker)?;
             // Recovery converged the note, so it owes the converged base the
@@ -221,8 +268,6 @@ impl TransactionEngine {
                 &materialized,
             )?;
             actions.push(index_repair(&marker));
-            marker.index_repaired = true;
-            persist_marker(&marker_path, &marker)?;
         }
         Ok(actions)
     }
@@ -276,7 +321,7 @@ impl TransactionEngine {
         Ok(summaries)
     }
 
-    /// Every review descriptor still awaiting a human, in deterministic order.
+    /// Every review still awaiting a human, in deterministic order.
     ///
     /// A descriptor is filed when a change cannot be integrated without someone
     /// deciding what it meant, and it stays on disk until they do; nothing
@@ -286,20 +331,19 @@ impl TransactionEngine {
     /// # Errors
     ///
     /// Returns an error if the transaction directory cannot be read.
-    pub fn pending_reviews(&self) -> Result<Vec<PathBuf>, TransactionError> {
+    pub fn pending_reviews(&self) -> Result<Vec<PendingReview>, TransactionError> {
         let directory = paths::transactions_dir(self.workspace.canonical_path());
         if !directory.exists() {
             return Ok(Vec::new());
         }
-        let mut descriptors = Vec::new();
+        let mut reviews = Vec::new();
         for entry in fs::read_dir(&directory)? {
-            let path = entry?.path();
-            if paths::is_review_descriptor(&path) {
-                descriptors.push(path);
+            if let Some(transaction_id) = paths::review_descriptor_transaction(&entry?.path()) {
+                reviews.push(PendingReview { transaction_id });
             }
         }
-        descriptors.sort();
-        Ok(descriptors)
+        reviews.sort_by_key(|review| review.transaction_id);
+        Ok(reviews)
     }
 
     /// Transactions of one note whose operations are journaled but whose
@@ -387,4 +431,95 @@ fn abandon(
 /// through is [`crate::marker::DurableState`] — the same one the engine wrote.
 fn persist_marker(path: &Path, marker: &DurableState) -> Result<(), TransactionError> {
     marker.persist(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn summary(state: &str, index_repaired: bool) -> TransactionSummary {
+        TransactionSummary {
+            transaction_id: TransactionId::new(),
+            note_id: NoteId::new(),
+            path: WorkspacePath::new("notes/a.md").expect("workspace path"),
+            state: state.to_owned(),
+            index_repaired,
+        }
+    }
+
+    #[test]
+    fn a_summary_answers_every_question_about_a_durable_state_itself() {
+        // The labels are this crate's vocabulary: the engine writes them and
+        // recovery rewrites them. A caller comparing the string would be
+        // holding a second copy, free to drift from the one on disk.
+        assert!(summary("COMMITTED", true).committed());
+        assert!(!summary("COMMITTED", true).aborted());
+        assert!(summary("ABORTED", false).aborted());
+        assert!(!summary("ABORTED", false).committed());
+        assert!(summary("COMMITTED", true).is_terminal());
+        assert!(summary("ABORTED", false).is_terminal());
+
+        for state in ["PREPARED", "OPERATIONS_DURABLE", "MATERIALIZING"] {
+            assert!(!summary(state, false).committed(), "{state}");
+            assert!(!summary(state, false).aborted(), "{state}");
+            assert!(!summary(state, false).is_terminal(), "{state}");
+        }
+
+        assert!(summary("COMMITTED", false).awaits_index_repair());
+        assert!(!summary("COMMITTED", true).awaits_index_repair());
+        assert!(
+            !summary("ABORTED", false).awaits_index_repair(),
+            "an aborted transaction has no committed version for an index to reflect"
+        );
+    }
+
+    #[test]
+    fn pending_reviews_name_the_transactions_waiting_and_not_the_files() {
+        use secondbrain_core::id::WorkspaceId;
+        use secondbrain_vault::WorkspaceRoot;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        let transactions = paths::transactions_dir(root);
+        fs::create_dir_all(&transactions).expect("create the transaction directory");
+        let mut filed = vec![TransactionId::new(), TransactionId::new()];
+        for transaction_id in &filed {
+            fs::write(paths::review_descriptor_path(root, *transaction_id), "{}")
+                .expect("file a review descriptor");
+        }
+        // A marker shares the directory and is not a review.
+        fs::write(
+            paths::marker_path(root, TransactionId::new()),
+            "not a descriptor",
+        )
+        .expect("write a marker");
+
+        let engine =
+            TransactionEngine::new(WorkspaceRoot::open(root).expect("root"), WorkspaceId::new());
+        let reviews = engine.pending_reviews().expect("read pending reviews");
+
+        filed.sort();
+        assert_eq!(
+            reviews
+                .iter()
+                .map(|review| review.transaction_id)
+                .collect::<Vec<_>>(),
+            filed,
+            "a marker counted as a review would report a person is needed when none is"
+        );
+    }
+
+    #[test]
+    fn an_unrecognized_durable_state_is_neither_committed_nor_aborted() {
+        // A marker holding a label this build does not know is not finished
+        // work, and must keep being reported as a transaction that never
+        // completed. Folding an unknown label into a known one — which is what
+        // typing this field would force, since the state machine models no
+        // aborted phase — would hide exactly that.
+        let unknown = summary("QUIESCED", false);
+
+        assert!(!unknown.committed());
+        assert!(!unknown.aborted());
+        assert!(!unknown.is_terminal());
+    }
 }

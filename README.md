@@ -33,6 +33,8 @@ secondbrain diff vault notes/meeting.md edited.md --out plan.json
 secondbrain transaction apply vault plan.json
 ```
 
+`diff` refuses a note whose file on disk is no longer the content the workspace last converged on. That gap means an editor outside the workspace saved over the note and nothing journaled it, so a plan derived there would record a version the file never held, and the journal could no longer replay to what is on disk. `note inspect` reports the same fact as `converged`.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -43,7 +45,7 @@ secondbrain transaction apply vault plan.json
 | `3` | The change is ambiguous and a human must decide what it meant. |
 | `4` | The command completed and reported problems with the workspace. |
 
-Code `3` is deliberately distinct from code `1`: a script that cannot tell "needs a person" from "the tool broke" will either page someone for a routine ambiguity or silently drop one. `diff` returns it for a change the semantic diff could not resolve, and `transaction apply` returns it rather than applying such a plan.
+Code `3` is deliberately distinct from code `1`: a script that cannot tell "needs a person" from "the tool broke" will either page someone for a routine ambiguity or silently drop one. `diff` returns it for a change the semantic diff could not resolve and for a note that diverged from its converged base, and `transaction apply` returns it rather than applying such a plan.
 
 Code `4` means the command ran correctly and is reporting on the workspace: `validate` returns it for notes that do not parse, do not round-trip, or claim an identity another note claims; `recovery check` returns it when an edit was abandoned or a journal was quarantined; `doctor` returns it for workspace-state problems. Broken links and orphaned notes are reported as counts but do not affect the exit code — a vault with broken links is a vault, not a broken workspace.
 

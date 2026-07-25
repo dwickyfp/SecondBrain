@@ -77,21 +77,41 @@ pub fn run(
     // anything else would produce a plan whose operations are anchored in text
     // the apply would never see.
     let base = read_file("read note", &workspace.root().resolve(&note_path)?)?;
+    let base_hash = ContentHash::digest(base.as_bytes());
+
+    // The version, though, comes from the converged base, and the engine
+    // validates only the hash. If the two disagree, the file holds an edit made
+    // outside the workspace that nothing has journaled: applying a plan built
+    // here would bump the version from a state the note no longer holds and
+    // record a new converged base over it, leaving an oplog that can never
+    // replay to the file on disk. "External edits are semantic operations,
+    // never silent overwrites" is the invariant that breaks, so this refuses
+    // instead of planning across the gap.
+    let snapshot = BaseSnapshotStore::new(workspace.root()).load(summary.note_id)?;
+    let expected_version = match &snapshot {
+        Some(snapshot) if !snapshot.describes(base_hash) => {
+            return Err(CliError::NoteDiverged {
+                path: note_path.to_string(),
+                version: snapshot.version.get(),
+            });
+        }
+        Some(snapshot) => snapshot.version,
+        // No base was ever recorded, so no transaction has ever touched this
+        // note and there is no earlier state for it to have diverged from.
+        None => GENESIS_VERSION,
+    };
+
     let incoming_source = read_file("read incoming file", incoming)?;
     let operations = diff_documents(
         &SourceDocument::parse(&base)?,
         &SourceDocument::parse(&incoming_source)?,
     );
-
-    let expected_version = BaseSnapshotStore::new(workspace.root())
-        .load(summary.note_id)?
-        .map_or(GENESIS_VERSION, |snapshot| snapshot.version);
     let plan = TransactionPlan {
         format: PLAN_FORMAT.to_owned(),
         workspace_id: workspace.manifest().workspace_id,
         note_id: summary.note_id,
         path: note_path,
-        expected_hash: ContentHash::digest(base.as_bytes()),
+        expected_hash: base_hash,
         expected_version,
         review_required: needs_review(&operations),
         operations,

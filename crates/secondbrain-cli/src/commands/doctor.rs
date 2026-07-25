@@ -116,7 +116,11 @@ pub fn run(format: Format, workspace: &Path) -> Result<u8, CliError> {
     let reviews = engine.pending_reviews()?;
     if !reviews.is_empty() {
         problems.push(Problem {
-            code: "SB-TXN-STALE-PRECONDITION",
+            // A stale precondition is one thing that sends a change to review,
+            // not the category. An ambiguous diff and an unresolvable identity
+            // file descriptors too, and an operator branching on the code needs
+            // the one fact common to all of them: a person has to decide.
+            code: "SB-REVIEW-REQUIRED",
             message: format!(
                 "{} awaiting a decision; see .secondbrain/transactions/",
                 plural(reviews.len(), "review", "reviews")
@@ -208,12 +212,9 @@ fn transaction_health(
         total: summaries.len(),
         committed: summaries
             .iter()
-            .filter(|summary| summary.state == "COMMITTED")
+            .filter(|summary| summary.committed())
             .count(),
-        aborted: summaries
-            .iter()
-            .filter(|summary| summary.state == "ABORTED")
-            .count(),
+        aborted: summaries.iter().filter(|summary| summary.aborted()).count(),
         pending: pending.len(),
         index_repairs_outstanding: outstanding,
     })

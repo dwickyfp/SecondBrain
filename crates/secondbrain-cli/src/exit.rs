@@ -49,8 +49,12 @@ pub enum CliError {
     Markdown(#[from] secondbrain_markdown::parse::ParseError),
     #[error("invalid actor or device identity: {0}")]
     Identity(#[from] IdentityError),
-    #[error("JSON handling failed: {0}")]
-    Json(#[from] serde_json::Error),
+    /// This binary could not serialize something it was about to print.
+    ///
+    /// Deliberately distinct from a plan that would not parse: one is this
+    /// tool failing, the other is a file an operator wrote.
+    #[error("could not encode output as JSON: {0}")]
+    Encode(#[from] serde_json::Error),
     #[error("could not {operation} {}: {source}", path.display())]
     Io {
         operation: &'static str,
@@ -61,6 +65,11 @@ pub enum CliError {
     IndexMissing(PathBuf),
     #[error("note {0} is not in the index; run `secondbrain index rebuild` first")]
     NoteNotIndexed(String),
+    #[error("plan file is not valid JSON: {source}")]
+    PlanUnreadable {
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("plan declares format {found}, not {expected}")]
     PlanFormat {
         expected: &'static str,
@@ -73,6 +82,12 @@ pub enum CliError {
     },
     #[error("this change is ambiguous and needs review: {0}")]
     ReviewRequired(String),
+    #[error(
+        "{path} on disk is not the content the workspace last converged on (base version \
+         {version}); that external edit has not been journaled, so a plan derived here would \
+         record a version the file never held"
+    )]
+    NoteDiverged { path: String, version: u64 },
 }
 
 impl CliError {
@@ -85,19 +100,30 @@ impl CliError {
             Self::Transaction(_) | Self::Snapshot(_) => "SB-TXN",
             Self::Markdown(_) => "SB-MD-INVALID",
             Self::Identity(_) => "SB-ID-INVALID",
-            Self::Json(_) => "SB-STORE-CORRUPT",
+            Self::Encode(_) => "SB-OUTPUT-ENCODE",
             Self::Io { .. } => "SB-IO",
-            Self::IndexMissing(_) | Self::NoteNotIndexed(_) => "SB-INDEX-MISSING",
-            Self::PlanFormat { .. } | Self::PlanWorkspace { .. } => "SB-PLAN-INVALID",
+            // The index is missing; the note is merely not in one that exists.
+            // An operator branching on these has different work to do.
+            Self::IndexMissing(_) => "SB-INDEX-MISSING",
+            Self::NoteNotIndexed(_) => "SB-NOTE-NOT-INDEXED",
+            Self::PlanUnreadable { .. } | Self::PlanFormat { .. } | Self::PlanWorkspace { .. } => {
+                "SB-PLAN-INVALID"
+            }
             Self::ReviewRequired(_) => "SB-REVIEW-REQUIRED",
+            Self::NoteDiverged { .. } => "SB-NOTE-DIVERGED",
         }
     }
 
     /// The exit code this failure ends the process with.
+    ///
+    /// A note that diverged from its converged base ends at [`REVIEW_REQUIRED`]
+    /// rather than [`FAILED`] for the reason this module opens with: a person
+    /// has to decide what the unjournaled edit meant, and a vault that is ahead
+    /// of its journal is not a broken tool.
     #[must_use]
     pub const fn exit_code(&self) -> u8 {
         match self {
-            Self::ReviewRequired(_) => REVIEW_REQUIRED,
+            Self::ReviewRequired(_) | Self::NoteDiverged { .. } => REVIEW_REQUIRED,
             _ => FAILED,
         }
     }
@@ -118,4 +144,172 @@ pub fn read_file(operation: &'static str, path: &std::path::Path) -> Result<Stri
         path: path.to_path_buf(),
         source,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use secondbrain_core::id::{NoteId, NoteVersion};
+
+    use super::*;
+
+    fn malformed_json() -> serde_json::Error {
+        serde_json::from_str::<serde_json::Value>("{").expect_err("fixture must be invalid")
+    }
+
+    /// Every `CliError` variant beside the exact code it must keep answering.
+    ///
+    /// Written the way `secondbrain-core`'s `error_contract.rs` is written, and
+    /// for the same reason: an operator scripts against these codes, so a
+    /// variant that quietly changed which one it answers would break a caller
+    /// that never saw a compiler error.
+    fn every_variant() -> Vec<(CliError, &'static str)> {
+        vec![
+            (
+                CliError::Core(secondbrain_core::Error::CorruptRecord {
+                    record: "note:01ARZ3NDEKTSV4RRFFQ69G5FAV".into(),
+                    summary: "content hash mismatch".into(),
+                }),
+                "SB-STORE-CORRUPT",
+            ),
+            (
+                CliError::Index(secondbrain_index::IndexError::MalformedNote {
+                    path: "notes/broken.md".into(),
+                    message: "unterminated front matter".into(),
+                }),
+                "SB-INDEX",
+            ),
+            (
+                CliError::IndexQuery(secondbrain_index::Error::InvalidStoredNoteId {
+                    value: "not-a-ulid".into(),
+                }),
+                "SB-INDEX",
+            ),
+            (
+                CliError::Transaction(secondbrain_transaction::TransactionError::VersionOverflow),
+                "SB-TXN",
+            ),
+            (
+                CliError::Snapshot(secondbrain_transaction::SnapshotError::UnsupportedFormat {
+                    note_id: NoteId::new(),
+                    format: "sb-base-snapshot-v2".into(),
+                }),
+                "SB-TXN",
+            ),
+            (
+                CliError::Markdown(secondbrain_markdown::parse::ParseError::UpstreamPanic(
+                    "the parser gave up".into(),
+                )),
+                "SB-MD-INVALID",
+            ),
+            (
+                CliError::Identity(
+                    secondbrain_core::actor::ActorId::new("")
+                        .expect_err("an empty actor is invalid"),
+                ),
+                "SB-ID-INVALID",
+            ),
+            (CliError::Encode(malformed_json()), "SB-OUTPUT-ENCODE"),
+            (
+                CliError::Io {
+                    operation: "read note",
+                    path: PathBuf::from("notes/alpha.md"),
+                    source: io::Error::new(io::ErrorKind::PermissionDenied, "private contents"),
+                },
+                "SB-IO",
+            ),
+            (
+                CliError::IndexMissing(PathBuf::from(".secondbrain/index.sqlite")),
+                "SB-INDEX-MISSING",
+            ),
+            (
+                CliError::NoteNotIndexed("notes/alpha.md".into()),
+                "SB-NOTE-NOT-INDEXED",
+            ),
+            (
+                CliError::PlanUnreadable {
+                    source: malformed_json(),
+                },
+                "SB-PLAN-INVALID",
+            ),
+            (
+                CliError::PlanFormat {
+                    expected: "sb-transaction-plan-v1",
+                    found: "sb-transaction-plan-v2".into(),
+                },
+                "SB-PLAN-INVALID",
+            ),
+            (
+                CliError::PlanWorkspace {
+                    plan: WorkspaceId::new(),
+                    workspace: WorkspaceId::new(),
+                },
+                "SB-PLAN-INVALID",
+            ),
+            (
+                CliError::ReviewRequired("two paragraphs are identical".into()),
+                "SB-REVIEW-REQUIRED",
+            ),
+            (
+                CliError::NoteDiverged {
+                    path: "notes/alpha.md".into(),
+                    version: NoteVersion::new(1).get(),
+                },
+                "SB-NOTE-DIVERGED",
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_variant_has_its_exact_stable_code() {
+        for (error, expected) in every_variant() {
+            assert_eq!(error.code(), expected, "variant: {error:?}");
+        }
+    }
+
+    #[test]
+    fn every_code_is_in_the_shared_namespace() {
+        for (error, _) in every_variant() {
+            let code = error.code();
+            assert!(
+                code.starts_with("SB-") && code.to_uppercase() == code,
+                "codes this binary invents share one namespace with the library's: {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_failures_a_person_must_decide_use_the_review_exit_code() {
+        for (error, _) in every_variant() {
+            let expected = match error {
+                CliError::ReviewRequired(_) | CliError::NoteDiverged { .. } => REVIEW_REQUIRED,
+                _ => FAILED,
+            };
+            assert_eq!(
+                error.exit_code(),
+                expected,
+                "`needs a human` and `broke` must stay tellable apart: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plan_that_is_not_json_is_not_reported_as_store_corruption() {
+        // An operator hand-editing a plan file has produced a bad plan, not a
+        // corrupt store: the store is what this workspace wrote for itself.
+        let error = CliError::PlanUnreadable {
+            source: malformed_json(),
+        };
+
+        assert_ne!(error.code(), "SB-STORE-CORRUPT");
+        assert_eq!(error.code(), "SB-PLAN-INVALID");
+    }
+
+    #[test]
+    fn a_note_absent_from_a_present_index_does_not_claim_the_index_is_missing() {
+        assert_ne!(
+            CliError::NoteNotIndexed("notes/alpha.md".into()).code(),
+            CliError::IndexMissing(PathBuf::from(".secondbrain/index.sqlite")).code(),
+            "one of these is fixed by a rebuild of an index that exists"
+        );
+    }
 }

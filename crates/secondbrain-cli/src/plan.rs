@@ -50,17 +50,35 @@ pub struct TransactionPlan {
     pub operations: Vec<SemanticOperation>,
 }
 
+/// The format tag alone, read before the rest of a plan file.
+///
+/// Unknown fields are ignored, which is the point: a plan from a newer binary
+/// may carry fields this one has never heard of, and the format question has to
+/// be answerable without them.
+#[derive(Deserialize)]
+struct PlanFormatTag {
+    format: String,
+}
+
 impl TransactionPlan {
     /// Parses a plan file, rejecting a format this binary does not understand.
+    ///
+    /// The format is read first, on its own. Deserializing the whole plan and
+    /// checking the tag afterwards would decide the format question by whether
+    /// every *other* field happened to parse — so a `sb-transaction-plan-v2`
+    /// file with one new required field would be reported as unreadable JSON
+    /// rather than as the newer format it announces, which is the one thing the
+    /// tag exists to prevent.
     pub fn parse(json: &str) -> Result<Self, CliError> {
-        let plan: Self = serde_json::from_str(json)?;
-        if plan.format != PLAN_FORMAT {
+        let tag: PlanFormatTag =
+            serde_json::from_str(json).map_err(|source| CliError::PlanUnreadable { source })?;
+        if tag.format != PLAN_FORMAT {
             return Err(CliError::PlanFormat {
                 expected: PLAN_FORMAT,
-                found: plan.format,
+                found: tag.format,
             });
         }
-        Ok(plan)
+        serde_json::from_str(json).map_err(|source| CliError::PlanUnreadable { source })
     }
 
     /// The transaction this plan asks for, as a fresh attempt attributed to

@@ -104,13 +104,16 @@ impl WorkspaceIndex {
 /// in the signature because a narrower refresh will want them, and because the
 /// trait is the transaction layer's statement of what it needs, not this
 /// implementation's statement of what it happens to do.
-impl IndexRefresh for &WorkspaceIndex {
+impl IndexRefresh for WorkspaceIndex {
     fn refresh(
         &self,
         _note_id: NoteId,
         _path: &WorkspacePath,
     ) -> Result<(), secondbrain_core::Error> {
-        rebuild(&self.root, &self.config)
+        // The same rebuild `index rebuild` runs, asked for through the same
+        // method, so a refresh and an explicit rebuild cannot come to mean
+        // different things.
+        self.rebuild()
             .map(|_| ())
             .map_err(|error| secondbrain_core::Error::Sqlite {
                 operation: "refresh derived index",
@@ -137,7 +140,7 @@ mod tests {
         let index = WorkspaceIndex::new(root);
         // Driven through the trait the transaction layer holds, not through the
         // inherent method, because the trait is what the coordinator will call.
-        let refresher: &dyn IndexRefresh = &&index;
+        let refresher: &dyn IndexRefresh = &index;
         refresher
             .refresh(
                 NoteId::new(),

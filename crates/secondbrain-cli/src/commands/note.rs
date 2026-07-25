@@ -132,9 +132,11 @@ pub fn inspect(format: Format, workspace: &Path, path: &str) -> Result<u8, CliEr
             title: summary.title,
             source_hash,
             converged_version: base.as_ref().map(|snapshot| snapshot.version),
+            // The same question `diff` refuses on, asked through the same
+            // library predicate so the two cannot come to different answers.
             converged: base
                 .as_ref()
-                .is_some_and(|snapshot| snapshot.source_hash == source_hash),
+                .is_some_and(|snapshot| snapshot.describes(source_hash)),
             outgoing_links,
             backlinks,
         },

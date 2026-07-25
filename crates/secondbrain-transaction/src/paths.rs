@@ -28,10 +28,13 @@ pub(crate) fn marker_path(workspace_root: &Path, transaction_id: TransactionId) 
 }
 
 /// The review descriptor filed under one transaction.
-pub(crate) fn review_descriptor_path(
-    workspace_root: &Path,
-    transaction_id: TransactionId,
-) -> PathBuf {
+///
+/// Public for the same reason [`is_review_descriptor`] is: anything that has to
+/// name one — including a test standing a pending review up — asks here rather
+/// than spelling `<id>.conflict.json` out for itself and drifting from the side
+/// that reads it.
+#[must_use]
+pub fn review_descriptor_path(workspace_root: &Path, transaction_id: TransactionId) -> PathBuf {
     transactions_dir(workspace_root).join(format!("{transaction_id}.conflict.json"))
 }
 
@@ -57,13 +60,22 @@ pub fn is_marker(path: &Path) -> bool {
 /// rather than re-deriving `<id>.conflict.json` for itself.
 #[must_use]
 pub fn is_review_descriptor(path: &Path) -> bool {
+    review_descriptor_transaction(path).is_some()
+}
+
+/// The transaction a review descriptor is filed under, or `None` when `path` is
+/// not one.
+///
+/// The filename *is* the identity, so recognizing a descriptor and naming the
+/// transaction it belongs to are one question, answered once.
+pub(crate) fn review_descriptor_transaction(path: &Path) -> Option<TransactionId> {
     if path.extension().and_then(|value| value.to_str()) != Some("json") {
-        return false;
+        return None;
     }
     path.file_stem()
         .and_then(|stem| stem.to_str())
         .and_then(|stem| stem.strip_suffix(".conflict"))
-        .is_some_and(|stem| stem.parse::<TransactionId>().is_ok())
+        .and_then(|stem| stem.parse::<TransactionId>().ok())
 }
 
 #[cfg(test)]

@@ -56,6 +56,20 @@ pub struct BaseSnapshot {
     pub source: String,
 }
 
+impl BaseSnapshot {
+    /// Whether this base is the content that hashes to `source_hash`.
+    ///
+    /// "Has this note been edited outside the workspace since it last
+    /// converged" is the question every caller that reads a file and a base
+    /// together has to answer, and getting it wrong means deriving operations
+    /// from a state the file no longer holds. It is therefore asked here rather
+    /// than re-derived by each caller from [`Self::source_hash`].
+    #[must_use]
+    pub fn describes(&self, source_hash: ContentHash) -> bool {
+        self.source_hash == source_hash
+    }
+}
+
 /// Why a converged base could not be read or written.
 #[derive(Debug, Error)]
 pub enum SnapshotError {
@@ -184,6 +198,11 @@ mod tests {
         assert_eq!(loaded.source, "# Note\n");
         assert_eq!(loaded.source_hash, ContentHash::digest("# Note\n"));
         assert_eq!(loaded.version, NoteVersion::new(3));
+        assert!(loaded.describes(ContentHash::digest("# Note\n")));
+        assert!(
+            !loaded.describes(ContentHash::digest("# Note\n\nEdited elsewhere.\n")),
+            "a file an external editor rewrote is not the state this base records"
+        );
     }
 
     #[test]

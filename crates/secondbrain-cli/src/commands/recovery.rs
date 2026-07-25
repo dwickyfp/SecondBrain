@@ -153,9 +153,14 @@ pub fn check(format: Format, workspace: &Path) -> Result<u8, CliError> {
         TransactionEngine::new(workspace.root().clone(), workspace.manifest().workspace_id);
     let actions = engine.recover()?;
 
-    let index_repairs = count(&actions, |action| {
-        matches!(action, RecoveryAction::IndexRepair { .. })
-    });
+    let repaired: Vec<NoteId> = actions
+        .iter()
+        .filter_map(|action| match action {
+            RecoveryAction::IndexRepair { note_id, .. } => Some(*note_id),
+            _ => None,
+        })
+        .collect();
+    let index_repairs = repaired.len();
     let quarantined = count(&actions, |action| {
         matches!(action, RecoveryAction::Quarantined { .. })
     });
@@ -166,9 +171,17 @@ pub fn check(format: Format, workspace: &Path) -> Result<u8, CliError> {
     // Recovery asks for the repair; performing it is this command's job, and
     // nothing else in the system would. One rebuild covers every note recovery
     // touched, because a rebuild is the only refresh the index crate offers.
+    //
+    // Recording it is a separate step on purpose. If the rebuild below fails,
+    // this returns before any marker is told the repair happened, so the next
+    // `recovery check` asks for it again instead of a marker claiming work
+    // nobody did.
     let index_refreshed = index_repairs > 0;
     if index_refreshed {
         workspace.index().rebuild()?;
+        for note_id in repaired {
+            engine.record_index_refreshed(note_id)?;
+        }
     }
 
     let code = if abandoned > 0 || quarantined > 0 {

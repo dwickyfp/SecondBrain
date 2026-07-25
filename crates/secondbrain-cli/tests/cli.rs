@@ -11,6 +11,7 @@
 //! handed to the binary, which is the only thing under test.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
@@ -161,6 +162,34 @@ fn note_id_of(vault: &Vault, path: &str) -> NoteId {
         .expect("a canonical note id")
 }
 
+/// Derives a plan turning `ALPHA` into `contents`, and returns the plan file.
+///
+/// Both the incoming file and the plan live in the scratch directory outside
+/// the workspace, for the reason [`Vault::scratch`] gives.
+fn plan_for(vault: &Vault, contents: &str) -> PathBuf {
+    plan_for_expecting(vault, contents, OK)
+}
+
+/// [`plan_for`], for a diff that is expected to end with `code` — the ambiguous
+/// case exits [`REVIEW_REQUIRED`] and still writes the plan it could not decide.
+fn plan_for_expecting(vault: &Vault, contents: &str, code: i32) -> PathBuf {
+    let incoming = vault.scratch("incoming.md");
+    fs::write(&incoming, contents).expect("write incoming file");
+    let plan = vault.scratch("plan.json");
+    secondbrain()
+        .args([
+            "diff",
+            vault.arg(),
+            ALPHA,
+            incoming.to_str().expect("UTF-8"),
+            "--out",
+            plan.to_str().expect("UTF-8"),
+        ])
+        .assert()
+        .code(code);
+    plan
+}
+
 /// Journals an edit to `ALPHA` and dies at `boundary`, leaving the workspace in
 /// whatever durable state that boundary produces.
 fn interrupted_edit(vault: &Vault, incoming: &str, boundary: &str) -> TransactionId {
@@ -190,6 +219,29 @@ fn interrupted_edit(vault: &Vault, incoming: &str, boundary: &str) -> Transactio
     let error = vault.engine().commit(request);
     failpoint::set(None);
     error.expect_err("the failpoint interrupts the commit");
+    transaction_id
+}
+
+/// Journals an edit to `ALPHA` and then damages the tail of its journal, which
+/// is what a torn write at a power failure leaves behind.
+fn interrupted_edit_with_a_damaged_journal(vault: &Vault) -> TransactionId {
+    let transaction_id = interrupted_edit(
+        vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
+        "after_append_before_state",
+    );
+    let note_directory = fs::read_dir(vault.path().join(".secondbrain/oplog"))
+        .expect("the journal directory exists")
+        .next()
+        .expect("one note was journaled")
+        .expect("read the entry")
+        .path();
+    fs::OpenOptions::new()
+        .append(true)
+        .open(note_directory.join("local-mutations.log"))
+        .expect("open the journal")
+        .write_all(b"truncated")
+        .expect("append bytes that are not a record");
     transaction_id
 }
 
@@ -476,6 +528,133 @@ fn diff_of_an_ambiguous_change_requires_review() {
     assert_eq!(plan["review_required"], true);
 }
 
+#[test]
+fn diff_refuses_a_note_whose_file_diverged_from_its_converged_base() {
+    let vault = Vault::indexed();
+    let plan = plan_for(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
+    );
+    secondbrain()
+        .args([
+            "transaction",
+            "apply",
+            vault.arg(),
+            plan.to_str().expect("UTF-8"),
+        ])
+        .assert()
+        .success();
+
+    // An external editor saved over the note. That edit is a semantic
+    // operation the journal has never seen, and the converged base still
+    // describes the state before it.
+    let external = "# Alpha\n\nAlpha links to [[beta]] after the retro.\n";
+    vault.write(ALPHA, external);
+
+    let incoming = vault.scratch("later.md");
+    fs::write(
+        &incoming,
+        "# Alpha\n\nAlpha links to [[beta]] after the retro, on Tuesday.\n",
+    )
+    .expect("write");
+    let out = vault.scratch("later-plan.json");
+    let output = secondbrain()
+        .args([
+            "diff",
+            vault.arg(),
+            ALPHA,
+            incoming.to_str().expect("UTF-8"),
+            "--out",
+            out.to_str().expect("UTF-8"),
+        ])
+        .output()
+        .expect("run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(REVIEW_REQUIRED),
+        "planning over an unjournaled external edit would bump the version from a \
+         base the file no longer holds, and the oplog could never replay to it: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !out.exists(),
+        "a refused diff must not leave a plan an operator could apply"
+    );
+    assert_eq!(
+        vault.read(ALPHA),
+        external,
+        "diff previews a change; it never performs one"
+    );
+    let error: Value = serde_json::from_slice(
+        &secondbrain()
+            .args([
+                "diff",
+                vault.arg(),
+                ALPHA,
+                incoming.to_str().expect("UTF-8"),
+                "--json",
+            ])
+            .output()
+            .expect("run")
+            .stderr,
+    )
+    .expect("the error is JSON too");
+    assert!(
+        error["error"]["code"]
+            .as_str()
+            .expect("code")
+            .starts_with("SB-"),
+        "{error}"
+    );
+}
+
+#[test]
+fn diff_of_a_converged_note_plans_against_its_recorded_base() {
+    let vault = Vault::indexed();
+    let applied = "# Alpha\n\nAlpha links to [[beta]] for the launch.\n";
+    let plan = plan_for(&vault, applied);
+    secondbrain()
+        .args([
+            "transaction",
+            "apply",
+            vault.arg(),
+            plan.to_str().expect("UTF-8"),
+        ])
+        .assert()
+        .success();
+    assert_eq!(vault.read(ALPHA), applied);
+
+    // Nothing touched the file behind the workspace's back, so the recorded
+    // base and the file agree and the next change plans normally.
+    let incoming = vault.scratch("later.md");
+    fs::write(
+        &incoming,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch on Tuesday.\n",
+    )
+    .expect("write");
+
+    let (code, next) = run_json(&[
+        "diff",
+        vault.arg(),
+        ALPHA,
+        incoming.to_str().expect("UTF-8"),
+    ]);
+
+    assert_eq!(code, OK, "{next}");
+    assert_eq!(
+        next["expected_version"], 1,
+        "the plan must continue from the version the base records: {next}"
+    );
+    assert!(
+        !next["operations"]
+            .as_array()
+            .expect("operations")
+            .is_empty(),
+        "{next}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // transaction apply
 // ---------------------------------------------------------------------------
@@ -483,21 +662,8 @@ fn diff_of_an_ambiguous_change_requires_review() {
 #[test]
 fn transaction_apply_materializes_the_plan_and_refreshes_the_index() {
     let vault = Vault::indexed();
-    let incoming = vault.scratch("incoming.md");
     let updated = "# Alpha\n\nAlpha links to [[beta]] for the launch.\n";
-    fs::write(&incoming, updated).expect("write");
-    let plan = vault.scratch("plan.json");
-    secondbrain()
-        .args([
-            "diff",
-            vault.arg(),
-            ALPHA,
-            incoming.to_str().expect("UTF-8"),
-            "--out",
-            plan.to_str().expect("UTF-8"),
-        ])
-        .assert()
-        .success();
+    let plan = plan_for(&vault, updated);
 
     let (code, report) = run_json(&[
         "transaction",
@@ -530,24 +696,10 @@ fn transaction_apply_materializes_the_plan_and_refreshes_the_index() {
 #[test]
 fn transaction_apply_refuses_a_plan_whose_precondition_moved() {
     let vault = Vault::indexed();
-    let incoming = vault.scratch("incoming.md");
-    fs::write(
-        &incoming,
+    let plan = plan_for(
+        &vault,
         "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
-    )
-    .expect("write");
-    let plan = vault.scratch("plan.json");
-    secondbrain()
-        .args([
-            "diff",
-            vault.arg(),
-            ALPHA,
-            incoming.to_str().expect("UTF-8"),
-            "--out",
-            plan.to_str().expect("UTF-8"),
-        ])
-        .assert()
-        .success();
+    );
 
     // Somebody else saved the note between the preview and the apply.
     vault.write(ALPHA, "# Alpha\n\nSomeone else got here first.\n");
@@ -576,20 +728,11 @@ fn transaction_apply_refuses_a_plan_that_needs_review() {
         .args(["index", "rebuild", vault.arg()])
         .assert()
         .success();
-    let incoming = vault.scratch("incoming.md");
-    fs::write(&incoming, "Duplicate.\n\nSome middle.\n\nChanged.\n").expect("write");
-    let plan = vault.scratch("plan.json");
-    secondbrain()
-        .args([
-            "diff",
-            vault.arg(),
-            ALPHA,
-            incoming.to_str().expect("UTF-8"),
-            "--out",
-            plan.to_str().expect("UTF-8"),
-        ])
-        .assert()
-        .code(REVIEW_REQUIRED);
+    let plan = plan_for_expecting(
+        &vault,
+        "Duplicate.\n\nSome middle.\n\nChanged.\n",
+        REVIEW_REQUIRED,
+    );
 
     secondbrain()
         .args([
@@ -607,27 +750,63 @@ fn transaction_apply_refuses_a_plan_that_needs_review() {
 }
 
 #[test]
+fn transaction_apply_names_the_format_of_a_plan_it_cannot_read() {
+    let vault = Vault::indexed();
+    let plan = plan_for(
+        &vault,
+        "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
+    );
+
+    // A plan from a newer binary: a format this one has never heard of, and a
+    // required field to match. The format tag is the thing that answers this,
+    // and it must answer before anything else in the file is parsed.
+    let mut newer: Value =
+        serde_json::from_str(&fs::read_to_string(&plan).expect("read plan")).expect("plan is JSON");
+    let object = newer.as_object_mut().expect("a plan is an object");
+    object.insert("format".into(), Value::from("sb-transaction-plan-v2"));
+    object.remove("expected_version");
+    object.insert("converged_at".into(), Value::from(7));
+    fs::write(&plan, serde_json::to_string_pretty(&newer).expect("encode")).expect("write");
+
+    let output = secondbrain()
+        .args([
+            "transaction",
+            "apply",
+            vault.arg(),
+            plan.to_str().expect("UTF-8"),
+            "--json",
+        ])
+        .output()
+        .expect("run");
+
+    assert_eq!(output.status.code(), Some(FAILED));
+    let error: Value = serde_json::from_slice(&output.stderr).expect("the error is JSON too");
+    assert_eq!(
+        error["error"]["code"], "SB-PLAN-INVALID",
+        "a newer plan format is not store corruption: {error}"
+    );
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("sb-transaction-plan-v2"),
+        "the operator must be told which format they handed over: {error}"
+    );
+    assert_eq!(
+        vault.read(ALPHA),
+        ALPHA_SOURCE,
+        "nothing may have been written"
+    );
+}
+
+#[test]
 fn transaction_apply_refuses_a_plan_from_another_workspace() {
     let vault = Vault::indexed();
     let other = Vault::indexed();
-    let incoming = vault.scratch("incoming.md");
-    fs::write(
-        &incoming,
+    let plan = plan_for(
+        &vault,
         "# Alpha\n\nAlpha links to [[beta]] for the launch.\n",
-    )
-    .expect("write");
-    let plan = vault.scratch("plan.json");
-    secondbrain()
-        .args([
-            "diff",
-            vault.arg(),
-            ALPHA,
-            incoming.to_str().expect("UTF-8"),
-            "--out",
-            plan.to_str().expect("UTF-8"),
-        ])
-        .assert()
-        .success();
+    );
 
     secondbrain()
         .args([
@@ -720,6 +899,136 @@ fn recovery_check_reports_an_edit_it_had_to_abandon() {
 }
 
 #[test]
+fn recovery_check_that_could_not_rebuild_leaves_the_repair_still_owed() {
+    let vault = Vault::indexed();
+    let updated = "# Alpha\n\nAlpha links to [[beta]] for the launch.\n";
+    interrupted_edit(&vault, updated, "after_commit_before_index");
+
+    // Two notes declaring one identity: the rebuild this command has to perform
+    // will refuse, so the repair recovery asked for never happens.
+    let shared = NoteId::new();
+    vault.write(
+        "notes/dup-one.md",
+        &format!("---\nid: {shared}\n---\n\n# One\n"),
+    );
+    vault.write(
+        "notes/dup-two.md",
+        &format!("---\nid: {shared}\n---\n\n# Two\n"),
+    );
+
+    secondbrain()
+        .args(["recovery", "check", vault.arg()])
+        .assert()
+        .code(FAILED);
+
+    // The marker must still owe the repair. Recording it here would be the
+    // marker lying: a later `recovery check` would find nothing to do and
+    // `doctor` would report a clean workspace over a stale index.
+    let (code, doctor) = run_json(&["doctor", vault.arg()]);
+    assert_eq!(code, DIAGNOSTICS, "{doctor}");
+    assert_eq!(
+        doctor["transactions"]["index_repairs_outstanding"], 1,
+        "a repair that never ran must still be outstanding: {doctor}"
+    );
+
+    // And once the obstruction is gone, the repair is still there to be done.
+    fs::remove_file(vault.path().join("notes/dup-one.md")).expect("remove");
+    fs::remove_file(vault.path().join("notes/dup-two.md")).expect("remove");
+    let (code, report) = run_json(&["recovery", "check", vault.arg()]);
+    assert_eq!(code, OK, "{report}");
+    assert!(
+        report["actions"]
+            .as_array()
+            .expect("actions")
+            .iter()
+            .any(|action| action["action"] == "index_repair"),
+        "the repair recovery could not finish must still be asked for: {report}"
+    );
+    let (code, search) = run_json(&["search", vault.arg(), "launch"]);
+    assert_eq!(code, OK, "{search}");
+    assert_eq!(
+        search["hits"].as_array().expect("hits").len(),
+        1,
+        "{search}"
+    );
+}
+
+#[test]
+fn recovery_check_reports_a_journal_suffix_it_had_to_quarantine() {
+    let vault = Vault::indexed();
+    let transaction_id = interrupted_edit_with_a_damaged_journal(&vault);
+
+    let (code, report) = run_json(&["recovery", "check", vault.arg()]);
+
+    assert_eq!(
+        code, DIAGNOSTICS,
+        "records set aside as damaged are not a success: {report}"
+    );
+    let quarantined = report["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .find(|action| action["action"] == "quarantined")
+        .unwrap_or_else(|| panic!("the quarantine must be reported: {report}"));
+    assert_eq!(quarantined["transaction_id"], transaction_id.to_string());
+    assert_eq!(
+        quarantined["path"], ALPHA,
+        "every action answers `which note` the same way: {report}"
+    );
+    assert_eq!(report["quarantined"], 1, "{report}");
+
+    let preserved = quarantined["quarantine_path"]
+        .as_str()
+        .expect("a quarantine names where the bytes went");
+    assert!(
+        Path::new(preserved).exists(),
+        "the damaged bytes must actually be preserved: {preserved}"
+    );
+    assert!(
+        Path::new(preserved)
+            .components()
+            .any(|component| component.as_os_str() == ".secondbrain"),
+        "a preserved journal suffix is not a note path: {preserved}"
+    );
+    assert_eq!(
+        vault.read(ALPHA),
+        ALPHA_SOURCE,
+        "a quarantine sets records aside; it never writes Markdown"
+    );
+}
+
+#[test]
+fn recovery_check_tells_a_human_where_the_quarantined_records_went() {
+    let vault = Vault::indexed();
+    interrupted_edit_with_a_damaged_journal(&vault);
+
+    let assertion = secondbrain()
+        .args(["recovery", "check", vault.arg()])
+        .assert()
+        .code(DIAGNOSTICS);
+    let stdout = String::from_utf8(assertion.get_output().stdout.clone()).expect("UTF-8");
+
+    // Naming the file is the whole point of preserving it: an operator who is
+    // not told the path cannot investigate what was lost.
+    assert!(
+        stdout.contains("quarantined notes/alpha.md"),
+        "the quarantine must name the note: {stdout}"
+    );
+    let (_, located) = stdout
+        .split_once("journal suffix preserved at ")
+        .unwrap_or_else(|| panic!("the operator must be told where the bytes went: {stdout}"));
+    let preserved = located.lines().next().expect("a path on its own line");
+    assert!(
+        Path::new(preserved.trim()).exists(),
+        "the path printed to a human must be the path on disk: {preserved}"
+    );
+    assert!(
+        stdout.contains("journal set aside"),
+        "the summary must say a person is needed: {stdout}"
+    );
+}
+
+#[test]
 fn recovery_check_of_a_clean_workspace_reports_no_actions() {
     let vault = Vault::indexed();
 
@@ -769,6 +1078,36 @@ fn doctor_reports_a_transaction_still_awaiting_recovery() {
             .iter()
             .any(|problem| problem["code"] == "SB-TXN-STATE"),
         "{report}"
+    );
+}
+
+#[test]
+fn doctor_reports_a_change_that_is_waiting_on_a_person() {
+    let vault = Vault::indexed();
+    // A descriptor is filed when a change cannot be integrated without someone
+    // deciding what it meant. Its path comes from the library so this fixture
+    // cannot drift from the convention the library reads back.
+    let descriptor =
+        secondbrain_transaction::paths::review_descriptor_path(vault.path(), TransactionId::new());
+    fs::create_dir_all(descriptor.parent().expect("a parent directory"))
+        .expect("create the transaction directory");
+    fs::write(&descriptor, "{}").expect("file the descriptor");
+
+    let (code, report) = run_json(&["doctor", vault.arg()]);
+
+    assert_eq!(code, DIAGNOSTICS, "{report}");
+    assert_eq!(report["reviews_pending"], 1, "{report}");
+    assert!(
+        report["problems"]
+            .as_array()
+            .expect("problems")
+            .iter()
+            .any(|problem| problem["code"] == "SB-REVIEW-REQUIRED"),
+        "a stale precondition is one cause of a review, not the category: {report}"
+    );
+    assert_eq!(
+        report["transactions"]["total"], 0,
+        "a descriptor is not a transaction marker: {report}"
     );
 }
 
