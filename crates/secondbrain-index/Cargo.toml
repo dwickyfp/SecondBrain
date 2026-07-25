@@ -10,8 +10,11 @@ path = "src/lib.rs"
 
 [dependencies]
 rusqlite.workspace = true
+secondbrain-core = { path = "../secondbrain-core" }
+secondbrain-markdown = { path = "../secondbrain-markdown" }
+secondbrain-vault = { path = "../secondbrain-vault" }
+serde_yaml.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-secondbrain-core = { path = "../secondbrain-core" }
 tempfile.workspace = true
