@@ -19,7 +19,7 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 
 | Metric | Value |
 |---|---|
-| **Phase 0 tasks completed** | 28 / 30 locally; cross-platform CI evidence pending |
+| **Phase 0 tasks completed** | 30 / 30; local and cross-platform CI evidence complete |
 | **Tests passing** | 348+ |
 | **Crates** | 6 (`cli`, `core`, `markdown`, `vault`, `index`, `transaction`) |
 | **CI** | macOS · Windows · Linux |
@@ -36,7 +36,7 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | E — Filesystem watcher and external-edit pipeline | 19–20 | ✅ Done |
 | F — Phase 0 CLI and end-to-end verification | 21–22 | ✅ Done |
 | G — Mandatory Loro vs Yrs spike | 23–27 | ✅ Done |
-| H — Phase 0 closure | 28–30 | 🔄 Task 28 done; CI/final remote evidence pending |
+| H — Phase 0 closure | 28–30 | ✅ Done |
 
 ---
 
@@ -129,8 +129,8 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | # | Task | Status |
 |---|---|---|
 | 28 | Integrate selected CRDT into production transaction core | ✅ |
-| 29 | Add cross-platform CI fixtures and platform-specific guards | 🔄 local pass, CI pending |
-| 30 | Run Phase 0 release gates and publish verification evidence | 🔄 local pass, CI pending |
+| 29 | Add cross-platform CI fixtures and platform-specific guards | ✅ CI matrix passed |
+| 30 | Run Phase 0 release gates and publish verification evidence | ✅ CI matrix and artifacts published |
 
 **Phase 0 acceptance checklist** (all must be supported by real evidence):
 

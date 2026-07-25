@@ -1,7 +1,8 @@
-# Phase 0 Final Verification (local gate)
+# Phase 0 Final Verification
 
-This document records the local gate. Cross-platform completion requires the
-GitHub Actions matrix artifacts; no remote result is claimed here.
+This document records the local release gate and the completed GitHub Actions
+matrix. Remote matrix: [CI 30175460707](https://github.com/dwickyfp/SecondBrain/actions/runs/30175460707)
+for commit `46a9a95`.
 
 ## Completed Locally
 
@@ -12,7 +13,7 @@ GitHub Actions matrix artifacts; no remote result is claimed here.
 - CRDT benchmark ran 66 isolated release processes with fixed seeds and raw JSON.
 - Task 28 Loro canonical state facade, framed persistence, CRC validation,
   legacy migration, and idempotence tests passed.
-- Platform contract passed locally on macOS; Windows/Linux remain matrix gates.
+- Platform contract passed locally and on macOS, Windows, and Linux matrix jobs.
 - External-agent binary test passed preview, apply, stale retry rejection,
   external reconciliation, search, and doctor without linking libraries.
 
@@ -42,5 +43,5 @@ cargo test -p secondbrain-vault --test platform -- --nocapture
 
 All passed locally after the canonical-state and identity-collision fixes,
 including `cargo deny --locked check -D warnings`, 10,000 release property cases,
-and release crash recovery. Windows/Linux matrix results remain pending until CI
-runs.
+and release crash recovery. The remote matrix also passed all quality, platform,
+E2E, benchmark-smoke, artifact-upload, and dependency-policy jobs.
