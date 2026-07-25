@@ -13,3 +13,6 @@ markdown.workspace = true
 secondbrain-core = { path = "../secondbrain-core" }
 serde.workspace = true
 serde_yaml.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

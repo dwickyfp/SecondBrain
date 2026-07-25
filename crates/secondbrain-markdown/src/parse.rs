@@ -3,6 +3,7 @@
 
 use markdown::mdast::Node;
 use markdown::{Constructs, ParseOptions, to_mdast};
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use crate::ast::{SemanticKind, SemanticNode};
@@ -27,12 +28,25 @@ pub struct SourceDocument {
 ///
 /// `markdown-rs` only errors on MDX syntax; with our options (no MDX) parsing
 /// is infallible in practice, but we surface the error type for completeness.
+/// The `UpstreamPanic` variant catches panics from upstream `markdown` crate
+/// bugs (e.g. `to_mdast` panics on certain minimal inputs in 1.0.0).
 #[derive(Debug)]
-pub struct ParseError(markdown::message::Message);
+pub enum ParseError {
+    /// A structured error from the `markdown` crate (e.g. MDX syntax).
+    Markdown(markdown::message::Message),
+    /// The upstream `markdown` crate panicked during parsing.
+    ///
+    /// This wraps the panic payload's string summary (sanitized) so callers
+    /// get a human-readable message without the raw `Box<dyn Any>`.
+    UpstreamPanic(String),
+}
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "markdown parse error: {}", self.0)
+        match self {
+            Self::Markdown(msg) => write!(f, "markdown parse error: {msg}"),
+            Self::UpstreamPanic(msg) => write!(f, "parser panic on upstream markdown crate: {msg}"),
+        }
     }
 }
 
@@ -40,7 +54,7 @@ impl std::error::Error for ParseError {}
 
 impl From<markdown::message::Message> for ParseError {
     fn from(msg: markdown::message::Message) -> Self {
-        Self(msg)
+        Self::Markdown(msg)
     }
 }
 
@@ -52,7 +66,9 @@ impl SourceDocument {
     ///
     /// # Errors
     ///
-    /// Only fails for MDX syntax errors, which are not enabled by default.
+    /// Fails for MDX syntax errors (not enabled by default) or if the upstream
+    /// `markdown` crate panics during parsing (known upstream bugs in 1.0.0 on
+    /// certain minimal inputs).
     pub fn parse(source: &str) -> Result<Self, ParseError> {
         let constructs = Constructs {
             frontmatter: true,
@@ -65,7 +81,31 @@ impl SourceDocument {
             ..ParseOptions::default()
         };
 
-        let mdast = to_mdast(source, &options)?;
+        // Wrap `to_mdast` in `catch_unwind` to gracefully handle upstream
+        // panics (markdown 1.0.0 has known bugs: `attempt to subtract with
+        // overflow` in list_item.rs:444 and `unwrap() on None` in
+        // to_mdast.rs:216). These are safe-Rust panics, not UB — catching them
+        // lets us return a structured `Err` instead of crashing the caller.
+        //
+        // `AssertUnwindSafe` is sound here because `to_mdast` takes `&str`
+        // (which is `UnwindSafe`) and `&ParseOptions` (a shared reference to a
+        // plain-data struct). On panic, neither value is in a partially-
+        // updated state — the panic originates inside the crate's own internal
+        // state, which is dropped before the unwind reaches us.
+        let mdast = match std::panic::catch_unwind(AssertUnwindSafe(|| to_mdast(source, &options)))
+        {
+            Ok(Ok(node)) => node,
+            Ok(Err(msg)) => return Err(ParseError::Markdown(msg)),
+            Err(payload) => {
+                let summary = payload
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or("unknown panic payload");
+                return Err(ParseError::UpstreamPanic(summary.to_string()));
+            }
+        };
+
         let line_ending = LineEnding::detect(source);
         let source_arc: Arc<str> = Arc::from(source);
         let root = convert_node(&mdast, source);
@@ -101,6 +141,23 @@ impl SourceDocument {
     #[must_use]
     pub fn line_ending(&self) -> LineEnding {
         self.line_ending
+    }
+
+    /// Deterministic semantic fingerprint of the document's node structure.
+    ///
+    /// Computes a [`Fingerprint`] — a 128-bit hash derived from the kinds and
+    /// byte spans of all semantic nodes (depth-first traversal). Content is
+    /// **not** hashed: two documents with identical structure but different
+    /// text produce the same fingerprint, while documents with different node
+    /// kinds or different span layouts produce different fingerprints.
+    ///
+    /// This is used as a round-trip invariant: parsing a document, serializing
+    /// it, and parsing again must yield the same fingerprint.
+    #[must_use]
+    pub fn semantic_fingerprint(&self) -> Fingerprint {
+        let mut hasher = FingerprintHasher::new();
+        hash_node(&self.root, &mut hasher);
+        hasher.finish()
     }
 
     /// Reconstruct the original source from semantic node spans.
@@ -144,6 +201,72 @@ impl SourceDocument {
         // char-boundary-aligned) or at gap boundaries between spans (also
         // char-boundary-aligned because spans are).
         String::from_utf8(result).expect("reconstructed bytes must be valid UTF-8")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Semantic fingerprint
+// ---------------------------------------------------------------------------
+
+/// A 128-bit semantic fingerprint.
+///
+/// Derived from the kinds and byte spans of all semantic nodes. Two documents
+/// with the same node structure (kinds + spans) have the same fingerprint;
+/// documents with different structure produce different fingerprints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Fingerprint {
+    /// Low 64 bits.
+    pub lo: u64,
+    /// High 64 bits.
+    pub hi: u64,
+}
+
+/// Simple deterministic 128-bit hasher for semantic fingerprints.
+///
+/// Uses two independent [`std::hash::SipHasher`] instances (seeded
+/// deterministically) to produce a 128-bit hash. The hash is built from
+/// the node kind discriminant and the start/end byte offsets.
+struct FingerprintHasher {
+    state: std::hash::DefaultHasher,
+}
+
+impl FingerprintHasher {
+    /// Create a new hasher.
+    fn new() -> Self {
+        Self {
+            state: std::hash::DefaultHasher::new(),
+        }
+    }
+
+    /// Write a u64 into the hash.
+    fn write_u64(&mut self, val: u64) {
+        use std::hash::Hasher;
+        self.state.write_u64(val);
+    }
+
+    /// Finish and produce a 128-bit fingerprint by hashing twice with
+    /// different seeds.
+    fn finish(self) -> Fingerprint {
+        use std::hash::Hasher;
+        let lo = self.state.finish();
+
+        // Second pass with a different seed for the high bits.
+        let mut h2 = std::hash::DefaultHasher::new();
+        h2.write_u64(0x5353_5353_5353_5353);
+        h2.write_u64(lo);
+        let hi = h2.finish();
+
+        Fingerprint { lo, hi }
+    }
+}
+
+/// Recursively hash a node's kind, span, and children into the hasher.
+fn hash_node(node: &SemanticNode, hasher: &mut FingerprintHasher) {
+    hasher.write_u64(node.kind as u64);
+    hasher.write_u64(node.span.start as u64);
+    hasher.write_u64(node.span.end as u64);
+    for child in &node.children {
+        hash_node(child, hasher);
     }
 }
 
@@ -322,5 +445,58 @@ mod tests {
         let doc = SourceDocument::parse(source).expect("parse");
         let nodes = doc.nodes();
         assert!(!nodes.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression: upstream markdown 1.0.0 panics must be caught, not crash.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn panic_frontmatter_empty_blockquote_returns_err() {
+        // `---\n\n>` triggers `called Option::unwrap() on None` at
+        // markdown-1.0.0 to_mdast.rs:216.
+        let source = "---\n\n>";
+        let result = SourceDocument::parse(source);
+        assert!(
+            result.is_err(),
+            "upstream panic input must return Err, not crash"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ParseError::UpstreamPanic(_)),
+            "expected UpstreamPanic, got {err:?}"
+        );
+        assert!(
+            err.to_string()
+                .contains("parser panic on upstream markdown crate"),
+            "error message must contain sanitized summary"
+        );
+    }
+
+    #[test]
+    fn panic_frontmatter_blockquote_text_returns_err() {
+        // `---\n\n> A` triggers `attempt to subtract with overflow` at
+        // markdown-1.0.0 list_item.rs:444 (in debug builds).
+        let source = "---\n\n> A";
+        let result = SourceDocument::parse(source);
+        assert!(
+            result.is_err(),
+            "upstream panic input must return Err, not crash"
+        );
+        assert!(
+            matches!(result.unwrap_err(), ParseError::UpstreamPanic(_)),
+            "expected UpstreamPanic variant"
+        );
+    }
+
+    #[test]
+    fn panic_error_display_is_human_readable() {
+        let source = "---\n\n>";
+        let err = SourceDocument::parse(source).unwrap_err();
+        let display = err.to_string();
+        assert!(
+            display.starts_with("parser panic on upstream markdown crate"),
+            "Display must start with sanitized prefix"
+        );
     }
 }
