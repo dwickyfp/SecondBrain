@@ -17,6 +17,7 @@
 //! - Requested file permissions are retained on Unix.
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use secondbrain_core::path::WorkspacePath;
