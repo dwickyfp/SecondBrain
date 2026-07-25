@@ -1,0 +1,5 @@
+---
+title: [unclosed bracket
+---
+
+Body.

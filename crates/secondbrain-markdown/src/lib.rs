@@ -7,9 +7,11 @@
 //! for zero-copy slicing.
 
 pub mod ast;
+pub mod frontmatter;
 pub mod parse;
 pub mod source;
 
 pub use ast::{SemanticKind, SemanticNode};
+pub use frontmatter::{MetadataPatch, NoteMetadata, ensure_note_id, parse_metadata};
 pub use parse::SourceDocument;
 pub use source::{LineEnding, SourceSpan};
