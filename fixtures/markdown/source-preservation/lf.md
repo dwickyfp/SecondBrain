@@ -1,0 +1,3 @@
+# LF Document
+
+Simple paragraph.
