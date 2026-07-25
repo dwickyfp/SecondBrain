@@ -6,8 +6,11 @@
 
 #![forbid(unsafe_code)]
 
+pub mod atomic_write;
 pub mod manifest;
+pub mod root;
 
 pub use manifest::{
     SUPPORTED_FORMAT_VERSION, WorkspaceManifest, initialize_workspace, load_manifest,
 };
+pub use root::WorkspaceRoot;
