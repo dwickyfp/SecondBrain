@@ -9,7 +9,9 @@
 //! This module is the low-level primitive; workspace confinement is enforced
 //! by [`crate::root::WorkspaceRoot`] before this function is ever called.
 
-use std::fs::{self, File};
+use std::fs;
+#[cfg(unix)]
+use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
