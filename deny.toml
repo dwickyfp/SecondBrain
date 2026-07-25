@@ -7,7 +7,14 @@ ignore = []
 confidence-threshold = 0.93
 allow = [
     "Apache-2.0",
+    "BSD-2-Clause",
     "MIT",
+    "Unicode-3.0",
+]
+
+[bans]
+skip = [
+    { crate = "syn@2.0.119", reason = "ULID wasm support requires web-time and wasm-bindgen, which still uses syn 2" },
 ]
 
 [sources]
