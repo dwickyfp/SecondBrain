@@ -50,7 +50,7 @@ test('keyboard workspace, palette containment and restored focus', async ({ page
   await expectAccessible(page);
   const search = page.getByLabel('Search workspace');
   await search.focus();
-  await page.keyboard.press('Meta+k');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   await expect(palette).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Find a command' })).toBeFocused();

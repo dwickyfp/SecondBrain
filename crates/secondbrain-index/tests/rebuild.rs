@@ -97,6 +97,18 @@ fn repeated_rebuild_and_deleted_database_have_same_logical_dump() {
 }
 
 #[test]
+fn rebuild_closes_and_removes_temporary_sqlite_sidecars_before_swap() {
+    let workspace = tempdir().unwrap();
+    valid_workspace(workspace.path());
+    rebuild(workspace.path(), &config()).unwrap();
+
+    let temporary = workspace.path().join(".secondbrain/index.sqlite.rebuild");
+    assert!(!temporary.exists());
+    assert!(!temporary.with_extension("rebuild-wal").exists());
+    assert!(!temporary.with_extension("rebuild-shm").exists());
+}
+
+#[test]
 fn shared_health_contract_reuses_valid_and_rebuilds_missing_added_changed_and_deleted_notes() {
     let dir = tempdir().unwrap();
     plain_workspace(dir.path());

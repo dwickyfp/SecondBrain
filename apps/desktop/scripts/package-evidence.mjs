@@ -22,7 +22,7 @@ for (const key of required) {
 }
 const git = (args) => execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).trim();
 const revision = git(['rev-parse', 'HEAD']);
-const sourceStatus = git(['status', '--porcelain']);
+const sourceStatus = git(['status', '--porcelain', '--untracked-files=no']);
 const sourceDiff = git(['diff', '--binary']);
 if (revision !== process.env.SB_BUILD_COMMIT) throw new Error('SB_BUILD_COMMIT is not the checked out revision');
 

@@ -199,6 +199,7 @@ pub fn rebuild(root: impl AsRef<Path>, config: &IndexConfig) -> Result<IndexRepo
         .connection()
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     drop(database);
+    remove_sidecars(&temporary)?;
     remove_sidecars(&active)?;
     remove_one(&active)?;
     fs::rename(&temporary, &active).map_err(|source| IndexError::Io {

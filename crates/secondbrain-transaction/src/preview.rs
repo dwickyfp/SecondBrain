@@ -218,6 +218,8 @@ fn apply_validated(
             path: preview.path.clone(),
         });
     }
+    // Windows cannot replace SQLite files while any connection still owns the WAL.
+    drop(database);
     let derived_review = needs_review(&preview.operations);
     if preview.review_required != derived_review {
         return Err(TransactionPreviewError::PreviewModified {
