@@ -13,6 +13,7 @@ path = "src/lib.rs"
 tauri-build = "=2.6.3"
 
 [dependencies]
+secondbrain-core = { path = "../../../crates/secondbrain-core" }
 secondbrain-index = { path = "../../../crates/secondbrain-index" }
 secondbrain-vault = { path = "../../../crates/secondbrain-vault" }
 serde = { version = "1.0.229", features = ["derive"] }

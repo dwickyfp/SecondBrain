@@ -2,7 +2,9 @@
   import { noteLabel, workspaceName } from './lib/presentation';
   import {
     openWorkspace,
+    readNote,
     searchWorkspace,
+    type NoteDocument,
     type NoteSummary,
     type SearchHit,
     type WorkspaceSummary
@@ -13,6 +15,7 @@
   let workspace = $state<WorkspaceSummary | null>(null);
   let results = $state<SearchHit[]>([]);
   let selected = $state<NoteSummary | null>(null);
+  let document = $state<NoteDocument | null>(null);
   let busy = $state(false);
   let error = $state('');
 
@@ -23,7 +26,10 @@
     try {
       workspace = await openWorkspace(root.trim());
       results = [];
-      selected = workspace.notes[0] ?? null;
+      const first = workspace.notes[0] ?? null;
+      selected = first;
+      document = null;
+      if (first) await load(first);
     } catch (cause) {
       error = String(cause);
     } finally {
@@ -47,8 +53,25 @@
     }
   }
 
+  async function load(note: NoteSummary) {
+    if (!workspace) return;
+    const workspaceRoot = workspace.root;
+    document = null;
+    busy = true;
+    error = '';
+    try {
+      const loaded = await readNote(workspaceRoot, note.path);
+      if (selected?.noteId === note.noteId && workspace?.root === workspaceRoot) document = loaded;
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      busy = false;
+    }
+  }
+
   function choose(note: NoteSummary) {
     selected = note;
+    void load(note);
   }
 </script>
 
@@ -101,7 +124,13 @@
         <p class="path">{selected.path}</p>
         <h1>{noteLabel(selected)}</h1>
         <div class="rule"></div>
-        <p class="placeholder">The workspace contract is live. Note rendering arrives in Task 35; this slice intentionally exposes no path that can rewrite your Markdown.</p>
+        {#if document}
+          <pre class="note-source" aria-label="Markdown source">{document.source}</pre>
+        {:else if busy}
+          <p class="placeholder">Loading Markdown source...</p>
+        {:else if !error}
+          <p class="placeholder">Select the note again to read its Markdown source.</p>
+        {/if}
         <dl>
           <div><dt>Note identity</dt><dd>{selected.noteId}</dd></div>
           <div><dt>Derived index</dt><dd>Ready</dd></div>

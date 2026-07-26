@@ -42,6 +42,7 @@ nav button small { margin-top: 3px; color: #6f756a; font: 10px "SFMono-Regular",
 .canvas h1 { margin: 16px 0; font: 400 clamp(48px, 6vw, 78px)/1 Georgia, serif; }
 .rule { width: 54px; height: 2px; margin: 28px 0; background: #c9d77d; }
 .placeholder { max-width: 650px; color: #a7ab9e; font: 20px/1.7 Georgia, serif; }
+.note-source { max-width: 100%; margin: 0; padding: 24px; overflow: auto; color: #d7dacd; background: #11130f; border: 1px solid #30342b; border-radius: 5px; font: 14px/1.7 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 dl { margin-top: 48px; border-top: 1px solid #30342b; }
 dl div { display: grid; grid-template-columns: 160px 1fr; padding: 14px 0; border-bottom: 1px solid #292d25; }
 dt { color: #777d70; font: 10px "SFMono-Regular", Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }

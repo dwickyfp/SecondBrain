@@ -3481,6 +3481,7 @@ dependencies = [
 name = "secondbrain-desktop"
 version = "0.1.0"
 dependencies = [
+ "secondbrain-core",
  "secondbrain-index",
  "secondbrain-vault",
  "serde",

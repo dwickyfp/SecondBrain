@@ -3,7 +3,7 @@
 > **Repository:** `~/Public/Research/SecondBrain` · [github.com/dwickyfp/SecondBrain](https://github.com/dwickyfp/SecondBrain) (private)
 > **Design spec:** `docs/specs/2026-07-25-secondbrain-design.md`
 > **Phase 0 plan:** `docs/plans/2026-07-25-phase-0-core-and-crdt-spike.md`
-> **Last updated:** 2026-07-25
+> **Last updated:** 2026-07-26
 
 ---
 
@@ -169,8 +169,8 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | 31 | Define Phase 1 milestones and acceptance gates | ✅ |
 | 32 | Create Tauri 2 + Svelte 5 desktop shell | ✅ local |
 | 33 | Add typed workspace-open and search backend contract | ✅ local |
-| 34 | Gate the desktop shell in CI | 🔄 CI pending |
-| 35 | Add note read contract and source rendering | ⬜ |
+| 34 | Gate the desktop shell in CI | 🔄 Windows fix pending remote CI |
+| 35 | Add note read contract and source rendering | ✅ local |
 | 36 | Add tabs, split panes, and navigation history | ⬜ |
 | 37 | Add outline and backlinks panels | ⬜ |
 | 38 | Add keyboard navigation and command palette foundation | ⬜ |
