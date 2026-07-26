@@ -152,15 +152,40 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 - [x] One CRDT selected through ADR; loser not in production
 - [x] Selected per-note CRDT integrated into transaction/recovery path
 - [x] Provisional converged-base state has one idempotent migration path
-- [ ] macOS, Windows, and Linux CI pass
-- [ ] Formatting, clippy, tests, dependency policy clean
-- [ ] No P0/P1 issue deferred
+- [x] macOS, Windows, and Linux CI pass
+- [x] Formatting, clippy, tests, dependency policy clean
+- [x] No P0/P1 issue deferred
 
 ---
 
 ## Phase 1 — Single-User Desktop
 
 **Goal:** Tauri/Svelte app with WYSIWYG/Source/Split editor, tabs/panes, search, backlinks, daily notes, properties, graph, and Obsidian-compatible vault import.
+
+**Plan:** `docs/plans/2026-07-26-phase-1-single-user-desktop.md`
+
+| Task | Deliverable | Status |
+|---:|---|:---:|
+| 31 | Define Phase 1 milestones and acceptance gates | ✅ |
+| 32 | Create Tauri 2 + Svelte 5 desktop shell | ✅ local |
+| 33 | Add typed workspace-open and search backend contract | ✅ local |
+| 34 | Gate the desktop shell in CI | 🔄 CI pending |
+| 35 | Add note read contract and source rendering | ⬜ |
+| 36 | Add tabs, split panes, and navigation history | ⬜ |
+| 37 | Add outline and backlinks panels | ⬜ |
+| 38 | Add keyboard navigation and command palette foundation | ⬜ |
+| 39 | Specify TipTap/ProseMirror transaction adapter | ⬜ |
+| 40 | Implement WYSIWYG editor | ⬜ |
+| 41 | Implement CodeMirror source editor | ⬜ |
+| 42 | Add WYSIWYG/source/split synchronization | ⬜ |
+| 43 | Enforce editor latency and Markdown-survival gates | ⬜ |
+| 44 | Add properties editing | ⬜ |
+| 45 | Add daily notes workflow | ⬜ |
+| 46 | Add graph view | ⬜ |
+| 47 | Add Obsidian-compatible vault import | ⬜ |
+| 48 | Add accessibility and recovery UX acceptance suite | ⬜ |
+| 49 | Enforce cold-start, open-note, search, and memory budgets | ⬜ |
+| 50 | Produce desktop installers and Phase 1 evidence | ⬜ |
 
 **Key deliverables:**
 - Tauri 2 desktop shell (macOS, Windows, Linux)

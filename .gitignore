@@ -1,5 +1,8 @@
 # Rust build output
 **/target/
+**/node_modules/
+**/dist/
+**/src-tauri/gen/schemas/
 **/*.rs.bk
 
 # macOS

@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/secondbrain-cli", "crates/secondbrain-core", "crates/secondbrain-crdt", "crates/secondbrain-index", "crates/secondbrain-transaction", "crates/secondbrain-vault", "crates/secondbrain-markdown", "spikes/crdt-comparison/contract", "spikes/crdt-comparison/loro-candidate", "spikes/crdt-comparison/benches"]
-exclude = ["spikes/crdt-comparison/yrs-candidate"]
+exclude = ["apps/desktop/src-tauri", "spikes/crdt-comparison/yrs-candidate"]
 resolver = "3"
 
 [workspace.package]
