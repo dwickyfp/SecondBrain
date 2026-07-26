@@ -22,8 +22,7 @@ for (const key of required) {
 }
 const git = (args) => execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).trim();
 const revision = git(['rev-parse', 'HEAD']);
-const sourceStatus = git(['status', '--porcelain', '--untracked-files=no']);
-const sourceDiff = git(['diff', '--binary']);
+const sourceDiff = git(['diff', '--binary', 'HEAD', '--']);
 if (revision !== process.env.SB_BUILD_COMMIT) throw new Error('SB_BUILD_COMMIT is not the checked out revision');
 
 await mkdir(output, { recursive: true });
@@ -48,7 +47,7 @@ const evidence = {
   schema: 'secondbrain.packaging-evidence.v1',
   version: packageJson.version,
   commit: revision,
-  source: { dirty: Boolean(sourceStatus), diff_sha256: createHash('sha256').update(sourceDiff).digest('hex'), mutable: Boolean(sourceStatus) },
+  source: { dirty: Boolean(sourceDiff), diff_sha256: createHash('sha256').update(sourceDiff).digest('hex'), mutable: Boolean(sourceDiff) },
   platform: process.env.SB_PLATFORM,
   installer: { name, kind, extension: expected[1], sha256, smoke: process.env.SB_PLATFORM === 'macOS' ? 'passed-exact-artifact-mount-and-launch' : 'passed-exact-artifact-extraction-and-launch', readiness_sha256: createHash('sha256').update(readinessBytes).digest('hex') },
   performance: process.env.SB_PERFORMANCE_MODE === 'named-reference' ? {
