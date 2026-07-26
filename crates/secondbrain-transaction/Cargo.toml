@@ -11,6 +11,7 @@ path = "src/lib.rs"
 [dependencies]
 crc32fast.workspace = true
 secondbrain-core = { path = "../secondbrain-core" }
+secondbrain-index = { path = "../secondbrain-index" }
 secondbrain-markdown = { path = "../secondbrain-markdown" }
 secondbrain-vault = { path = "../secondbrain-vault" }
 serde.workspace = true

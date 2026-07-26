@@ -1,0 +1,14 @@
+{
+  "format": "sb-transaction-preview-v1",
+  "workspace_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "note_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "path": "notes/example.md",
+  "actor": "typescript-agent",
+  "device": "browser",
+  "expected_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "expected_version": 0,
+  "proposed_source_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "review_required": false,
+  "summary": "no semantic change",
+  "operations": []
+}

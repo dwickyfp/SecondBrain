@@ -10,7 +10,7 @@ use std::path::Path;
 
 use secondbrain_core::actor::{ActorId, DeviceId};
 use secondbrain_core::id::{NoteId, NoteVersion, TransactionId};
-use secondbrain_transaction::TransactionEngine;
+use secondbrain_transaction::{LegacyTransactionPreview, apply_legacy_preview};
 use serde::Serialize;
 
 use crate::commands::{CLI_ACTOR, CLI_DEVICE};
@@ -53,45 +53,45 @@ pub fn apply(format: Format, workspace: &Path, plan_file: &Path) -> Result<u8, C
     let workspace = Workspace::open(workspace)?;
     let plan = TransactionPlan::parse(&read_file("read plan", plan_file)?)?;
 
-    if plan.workspace_id != workspace.manifest().workspace_id {
-        return Err(CliError::PlanWorkspace {
-            plan: plan.workspace_id,
-            workspace: workspace.manifest().workspace_id,
-        });
-    }
-    if plan.review_required {
-        return Err(CliError::ReviewRequired(format!(
-            "the plan for {} was derived from an ambiguous change and records no decision",
-            plan.path
-        )));
-    }
-
-    let engine =
-        TransactionEngine::new(workspace.root().clone(), workspace.manifest().workspace_id);
-    let request = plan.request(ActorId::new(CLI_ACTOR)?, DeviceId::new(CLI_DEVICE)?);
-    let transaction_id = request.id;
-    let note_id = request.note_id;
-    let outcome = engine.commit(request)?;
-
-    // The commit left the marker saying the index repair is still owed, because
-    // at that point it was. Refreshing the index and then recording it is what
-    // makes the marker honest — and if the refresh below fails, the flag stays
-    // clear and `recovery check` asks for the repair instead.
-    let index_refreshed = outcome.changed;
-    if index_refreshed {
-        workspace.index().rebuild()?;
-        engine.record_index_refreshed(note_id)?;
-    }
+    let outcome = apply_legacy_preview(
+        workspace.path(),
+        LegacyTransactionPreview {
+            workspace_id: plan.workspace_id,
+            note_id: plan.note_id,
+            path: plan.path.clone(),
+            expected_hash: plan.expected_hash,
+            expected_version: plan.expected_version,
+            review_required: plan.review_required,
+            operations: plan.operations.clone(),
+        },
+        ActorId::new(CLI_ACTOR)?,
+        DeviceId::new(CLI_DEVICE)?,
+    )
+    .map_err(|error| match error {
+        secondbrain_transaction::TransactionPreviewError::WorkspaceMismatch {
+            preview,
+            workspace,
+        } => CliError::PlanWorkspace {
+            plan: preview,
+            workspace,
+        },
+        secondbrain_transaction::TransactionPreviewError::NeedsReview(path) => {
+            CliError::ReviewRequired(format!(
+                "the plan for {path} was derived from an ambiguous change and records no decision"
+            ))
+        }
+        error => CliError::Preview(error),
+    })?;
 
     emit(
         format,
         &ApplyReport {
-            transaction_id,
-            note_id,
-            path: plan.path.to_string(),
+            transaction_id: outcome.transaction_id,
+            note_id: outcome.note_id,
+            path: outcome.path.to_string(),
             changed: outcome.changed,
             version: outcome.version,
-            index_refreshed,
+            index_refreshed: outcome.index_refreshed,
         },
     )?;
     Ok(OK)

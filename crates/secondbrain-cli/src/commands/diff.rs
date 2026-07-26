@@ -8,16 +8,14 @@
 
 use std::path::Path;
 
-use secondbrain_core::hash::ContentHash;
-use secondbrain_core::path::WorkspacePath;
-use secondbrain_markdown::SourceDocument;
-use secondbrain_markdown::diff::diff_documents;
-use secondbrain_vault::base_snapshot::{BaseSnapshotStore, GENESIS_VERSION};
+use secondbrain_core::actor::{ActorId, DeviceId};
+use secondbrain_transaction::preview_transaction;
 use serde::Serialize;
 
+use crate::commands::{CLI_ACTOR, CLI_DEVICE};
 use crate::exit::{CliError, OK, REVIEW_REQUIRED, read_file};
 use crate::output::{Format, Report, emit, plural};
-use crate::plan::{PLAN_FORMAT, TransactionPlan, needs_review};
+use crate::plan::{PLAN_FORMAT, TransactionPlan};
 use crate::workspace::Workspace;
 
 /// Where a written plan ended up.
@@ -62,57 +60,23 @@ pub fn run(
     out: Option<&Path>,
 ) -> Result<u8, CliError> {
     let workspace = Workspace::open(workspace)?;
-    let note_path = WorkspacePath::new(path)?;
-    let database = workspace.open_index()?;
-    let summary = database.note_by_path(note_path.as_str())?.ok_or_else(|| {
-        CliError::Core(secondbrain_core::Error::NoteNotIndexed {
-            path: note_path.as_path().to_path_buf(),
-        })
-    })?;
-
-    // The base is the note as it is on disk, which is exactly the precondition
-    // the transaction engine checks when the plan is applied. Diffing against
-    // anything else would produce a plan whose operations are anchored in text
-    // the apply would never see.
-    let base = read_file("read note", &workspace.root().resolve(&note_path)?)?;
-    let base_hash = ContentHash::digest(base.as_bytes());
-
-    // The version, though, comes from the converged base, and the engine
-    // validates only the hash. If the two disagree, the file holds an edit made
-    // outside the workspace that nothing has journaled: applying a plan built
-    // here would bump the version from a state the note no longer holds and
-    // record a new converged base over it, leaving an oplog that can never
-    // replay to the file on disk. "External edits are semantic operations,
-    // never silent overwrites" is the invariant that breaks, so this refuses
-    // instead of planning across the gap.
-    let snapshot = BaseSnapshotStore::new(workspace.root()).load(summary.note_id)?;
-    let expected_version = match &snapshot {
-        Some(snapshot) if !snapshot.describes(base_hash) => {
-            return Err(CliError::Core(secondbrain_core::Error::NoteDiverged {
-                path: note_path.as_path().to_path_buf(),
-                version: snapshot.version,
-            }));
-        }
-        Some(snapshot) => snapshot.version,
-        // No base was ever recorded, so no transaction has ever touched this
-        // note and there is no earlier state for it to have diverged from.
-        None => GENESIS_VERSION,
-    };
-
     let incoming_source = read_file("read incoming file", incoming)?;
-    let operations = diff_documents(
-        &SourceDocument::parse(&base)?,
-        &SourceDocument::parse(&incoming_source)?,
-    );
+    let preview = preview_transaction(
+        workspace.path(),
+        path,
+        &incoming_source,
+        ActorId::new(CLI_ACTOR)?,
+        DeviceId::new(CLI_DEVICE)?,
+    )?;
     let plan = TransactionPlan {
         format: PLAN_FORMAT.to_owned(),
-        workspace_id: workspace.manifest().workspace_id,
-        note_id: summary.note_id,
-        path: note_path,
-        expected_hash: base_hash,
-        expected_version,
-        review_required: needs_review(&operations),
-        operations,
+        workspace_id: preview.workspace_id,
+        note_id: preview.note_id,
+        path: preview.path,
+        expected_hash: preview.expected_hash,
+        expected_version: preview.expected_version,
+        review_required: preview.review_required,
+        operations: preview.operations,
     };
 
     let code = if plan.review_required {

@@ -11,12 +11,10 @@
 //! plan, and it is minted at apply time, so that re-applying a plan can never
 //! reuse the identity of an attempt that already happened.
 
-use secondbrain_core::actor::{ActorId, DeviceId};
 use secondbrain_core::hash::ContentHash;
-use secondbrain_core::id::{NoteId, NoteVersion, TransactionId, WorkspaceId};
+use secondbrain_core::id::{NoteId, NoteVersion, WorkspaceId};
 use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::operation::SemanticOperation;
-use secondbrain_transaction::TransactionRequest;
 use serde::{Deserialize, Serialize};
 
 use crate::exit::CliError;
@@ -81,22 +79,6 @@ impl TransactionPlan {
         serde_json::from_str(json).map_err(|source| CliError::PlanUnreadable { source })
     }
 
-    /// The transaction this plan asks for, as a fresh attempt attributed to
-    /// `actor` on `device`.
-    #[must_use]
-    pub fn request(&self, actor: ActorId, device: DeviceId) -> TransactionRequest {
-        TransactionRequest {
-            id: TransactionId::new(),
-            actor,
-            device,
-            note_id: self.note_id,
-            path: self.path.clone(),
-            expected_hash: self.expected_hash,
-            expected_version: self.expected_version,
-            operations: self.operations.clone(),
-        }
-    }
-
     /// A one-line summary of what the plan would do, per operation kind.
     #[must_use]
     pub fn summary(&self) -> String {
@@ -136,12 +118,4 @@ impl Report for TransactionPlan {
         }
         text
     }
-}
-
-/// Whether any operation demands human review.
-#[must_use]
-pub fn needs_review(operations: &[SemanticOperation]) -> bool {
-    operations
-        .iter()
-        .any(|operation| matches!(operation, SemanticOperation::NeedsReview { .. }))
 }

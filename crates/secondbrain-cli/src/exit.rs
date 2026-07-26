@@ -44,6 +44,8 @@ pub enum CliError {
     #[error("{0}")]
     Transaction(#[from] secondbrain_transaction::TransactionError),
     #[error("{0}")]
+    Preview(#[from] secondbrain_transaction::TransactionPreviewError),
+    #[error("{0}")]
     Snapshot(#[from] secondbrain_vault::SnapshotError),
     #[error("{0}")]
     ExternalEdit(#[from] secondbrain_transaction::ExternalEditError),
@@ -94,7 +96,12 @@ impl CliError {
             // One code for the transaction layer's failures, whichever of its
             // error types carried them: an operator branching on this has the
             // same work to do either way, and the message says which.
-            Self::Transaction(_) | Self::Snapshot(_) | Self::ExternalEdit(_) => "SB-TXN",
+            Self::Preview(secondbrain_transaction::TransactionPreviewError::Core(error)) => {
+                error.code()
+            }
+            Self::Transaction(_) | Self::Preview(_) | Self::Snapshot(_) | Self::ExternalEdit(_) => {
+                "SB-TXN"
+            }
             Self::Markdown(_) => "SB-MD-INVALID",
             Self::Identity(_) => "SB-ID-INVALID",
             Self::Encode(_) => "SB-OUTPUT-ENCODE",
@@ -120,9 +127,11 @@ impl CliError {
     #[must_use]
     pub const fn exit_code(&self) -> u8 {
         match self {
-            Self::ReviewRequired(_) | Self::Core(secondbrain_core::Error::NoteDiverged { .. }) => {
-                REVIEW_REQUIRED
-            }
+            Self::ReviewRequired(_)
+            | Self::Core(secondbrain_core::Error::NoteDiverged { .. })
+            | Self::Preview(secondbrain_transaction::TransactionPreviewError::Core(
+                secondbrain_core::Error::NoteDiverged { .. },
+            )) => REVIEW_REQUIRED,
             _ => FAILED,
         }
     }
@@ -195,6 +204,14 @@ mod tests {
                 "SB-TXN",
             ),
             CliError::Transaction(_) => (
+                CliError::Preview(
+                    secondbrain_transaction::TransactionPreviewError::IndexMissing(PathBuf::from(
+                        ".secondbrain/index.sqlite",
+                    )),
+                ),
+                "SB-TXN",
+            ),
+            CliError::Preview(_) => (
                 CliError::Snapshot(secondbrain_vault::SnapshotError::UnsupportedFormat {
                     note_id: NoteId::new(),
                     format: "sb-base-snapshot-v2".into(),

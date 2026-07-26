@@ -12,6 +12,7 @@ pub mod failpoint;
 mod marker;
 pub mod oplog;
 pub mod paths;
+pub mod preview;
 pub mod record;
 pub mod recovery;
 pub mod state;
@@ -20,6 +21,11 @@ pub use engine::{CommitOutcome, TransactionEngine, TransactionError, Transaction
 pub use external_edit::{
     ExternalEditCoordinator, ExternalEditError, ExternalEditOutcome, IndexRefresh,
     InternalWriteReceipts, NoWatcher,
+};
+pub use preview::{
+    ApplyPreviewOutcome, LegacyTransactionPreview, TRANSACTION_PREVIEW_FORMAT_V1,
+    TransactionPreview, TransactionPreviewError, apply_legacy_preview, apply_preview,
+    preview_transaction,
 };
 pub use recovery::{AbandonedReason, PendingReview, RecoveryAction, TransactionSummary};
 pub use state::{StateTransitionError, TransactionState};
