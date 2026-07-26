@@ -117,6 +117,9 @@ jobs:
         run: npm ci
         working-directory: apps/desktop
 
+      - name: Validate repository agent skills
+        run: node scripts/validate-agent-skills.mjs
+
       - name: Check frontend types
         run: npm run check
         working-directory: apps/desktop

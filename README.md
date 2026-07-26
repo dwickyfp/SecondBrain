@@ -2,10 +2,10 @@
 
 SecondBrain is a Rust-first project for a local-first knowledge system with Markdown as its durable representation.
 
-This repository contains the completed Phase 0 Rust workspace and the first
-Phase 1 desktop vertical slice under `apps/desktop`. The desktop shell is a
-Tauri 2 + Svelte 5 workspace browser over the same Rust manifest, index, and
-search paths used by the CLI; editing remains a planned Phase 1 milestone.
+This repository contains the completed Phase 0 Rust workspace and the Phase 1
+desktop implementation under `apps/desktop`. The Tauri 2 + Svelte 5 app provides
+WYSIWYG, source, and split editing over the same Rust manifest, index, and
+transaction paths used by the CLI.
 
 The mandatory CRDT spike selected **Loro 1.13.7** for production integration. Loro passed all shared mandatory scenarios; Yrs 0.27.3 was ineligible because it lacks a native identity-preserving ordered move and also requires an unstable compiler feature on the pinned Rust toolchain. See [ADR 0001](docs/adr/0001-select-production-crdt.md). The canonical per-note state is documented in [Phase 0 formats](docs/phase-0-format.md) and operated through [Phase 0 operations](docs/phase-0-operations.md).
 
@@ -29,6 +29,27 @@ secondbrain doctor <workspace>                            # one report on worksp
 ```
 
 `--json` is accepted by every command and emits a stable machine contract, documented field by field under [The `--json` contract](#the---json-contract). Neither form of output ever contains ANSI escapes.
+
+## Agent skills
+
+Repository-default skills live in `.agents/skills` and follow the open
+[Agent Skills specification](https://agentskills.io/specification). OpenCode and
+Codex discover this location automatically when started anywhere in the
+repository. Other compatible hosts can import the same directories without
+rewriting the skills.
+
+| Skill | Use |
+| --- | --- |
+| `secondbrain-cli` | Safe JSON CLI workflows for search, preview/apply edits, note and daily-note creation, typed properties, graph, import, recovery, and diagnostics. |
+| `secondbrain-markdown` | Source-preserving CommonMark/GFM/Obsidian-compatible authoring guidance for notes, wikilinks, embeds, callouts, tasks, tags, and properties. |
+
+The skills intentionally direct agents through the production CLI and shared
+Rust transaction contracts. They do not authorize direct writes to tracked
+Markdown or `.secondbrain/` state. Validate them with:
+
+```bash
+node scripts/validate-agent-skills.mjs
+```
 
 ### Previewing and applying a change
 
