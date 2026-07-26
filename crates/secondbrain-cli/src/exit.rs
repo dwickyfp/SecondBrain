@@ -46,6 +46,12 @@ pub enum CliError {
     #[error("{0}")]
     Preview(#[from] secondbrain_transaction::TransactionPreviewError),
     #[error("{0}")]
+    Create(#[from] secondbrain_transaction::NoteCreateError),
+    #[error("{0}")]
+    Daily(#[from] secondbrain_transaction::DailyNoteError),
+    #[error("{0}")]
+    Import(#[from] secondbrain_index::ImportError),
+    #[error("{0}")]
     Snapshot(#[from] secondbrain_vault::SnapshotError),
     #[error("{0}")]
     ExternalEdit(#[from] secondbrain_transaction::ExternalEditError),
@@ -99,9 +105,13 @@ impl CliError {
             Self::Preview(secondbrain_transaction::TransactionPreviewError::Core(error)) => {
                 error.code()
             }
-            Self::Transaction(_) | Self::Preview(_) | Self::Snapshot(_) | Self::ExternalEdit(_) => {
-                "SB-TXN"
-            }
+            Self::Transaction(_)
+            | Self::Preview(_)
+            | Self::Create(_)
+            | Self::Daily(_)
+            | Self::Snapshot(_)
+            | Self::ExternalEdit(_) => "SB-TXN",
+            Self::Import(_) => "SB-IMPORT",
             Self::Markdown(_) => "SB-MD-INVALID",
             Self::Identity(_) => "SB-ID-INVALID",
             Self::Encode(_) => "SB-OUTPUT-ENCODE",
@@ -212,6 +222,22 @@ mod tests {
                 "SB-TXN",
             ),
             CliError::Preview(_) => (
+                CliError::Create(secondbrain_transaction::NoteCreateError::PreviewModified(
+                    "source_hash",
+                )),
+                "SB-TXN",
+            ),
+            CliError::Create(_) => (
+                CliError::Daily(secondbrain_transaction::DailyNoteError::InvalidDate(
+                    "2026-02-30".into(),
+                )),
+                "SB-TXN",
+            ),
+            CliError::Daily(_) => (
+                CliError::Import(secondbrain_index::ImportError::Blocked),
+                "SB-IMPORT",
+            ),
+            CliError::Import(_) => (
                 CliError::Snapshot(secondbrain_vault::SnapshotError::UnsupportedFormat {
                     note_id: NoteId::new(),
                     format: "sb-base-snapshot-v2".into(),

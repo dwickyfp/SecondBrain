@@ -214,3 +214,15 @@ fn existing_user_markdown_files_are_byte_identical_after_init() {
         "user Markdown files must be byte-identical after initialization"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn initialization_rejects_internal_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    symlink(outside.path(), workspace.path().join(".secondbrain")).unwrap();
+    assert!(initialize_workspace(workspace.path()).is_err());
+    assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
+}

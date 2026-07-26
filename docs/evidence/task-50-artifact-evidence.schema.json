@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://secondbrain.dev/evidence/task-50-artifact-evidence.schema.json",
+  "title": "SecondBrain packaging evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "commit", "platform", "installer", "performance", "fixture_sha256", "tools", "signing", "inputs", "source", "ci"],
+  "properties": {
+    "schema": { "const": "secondbrain.packaging-evidence.v1" },
+    "version": { "type": "string", "minLength": 1 },
+    "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "platform": { "enum": ["Linux", "macOS", "Windows"] },
+    "installer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "extension", "sha256", "smoke", "readiness_sha256"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["macOS-DMG", "Windows-MSI", "Linux-DEB"] },
+        "extension": { "enum": [".dmg", ".msi", ".deb"] },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "smoke": { "enum": ["passed-exact-artifact-mount-and-launch", "passed-exact-artifact-extraction-and-launch"] },
+        "readiness_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "macOS-DMG" } } }, "then": { "properties": { "smoke": { "const": "passed-exact-artifact-mount-and-launch" } } } },
+        { "if": { "properties": { "kind": { "enum": ["Windows-MSI", "Linux-DEB"] } } }, "then": { "properties": { "smoke": { "const": "passed-exact-artifact-extraction-and-launch" } } } }
+      ]
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_sha256", "p95_bytes", "budget_bytes", "status", "mode"],
+      "properties": {
+        "sample_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "p95_bytes": { "type": "integer", "minimum": 1 },
+        "budget_bytes": { "type": ["integer", "null"], "minimum": 1 },
+        "status": { "enum": ["passed", "recorded-not-enforced"] },
+        "mode": { "enum": ["named-reference", "hosted-ci-smoke-non-reference"] }
+      },
+      "allOf": [
+        { "if": { "properties": { "mode": { "const": "named-reference" } } }, "then": { "properties": { "budget_bytes": { "const": 262144000 }, "status": { "const": "passed" } } } },
+        { "if": { "properties": { "mode": { "const": "hosted-ci-smoke-non-reference" } } }, "then": { "properties": { "budget_bytes": { "type": "null" }, "status": { "const": "recorded-not-enforced" } } } }
+      ]
+    },
+    "fixture_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tauri_cli", "rustc", "node"],
+      "properties": {
+        "tauri_cli": { "type": "string", "minLength": 1 },
+        "rustc": { "type": "string", "minLength": 1 },
+        "node": { "type": "string", "minLength": 1 }
+      }
+    },
+    "signing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "notarization_status", "reason"],
+      "properties": {
+        "status": { "enum": ["unsigned", "signed", "not-configured", "failed"] },
+        "notarization_status": { "enum": ["not-applicable", "notarized", "not-configured", "failed"] },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "const": "unsigned" } } }, "then": { "properties": { "notarization_status": { "const": "not-applicable" } } } },
+        { "if": { "properties": { "status": { "const": "signed" } } }, "then": { "properties": { "notarization_status": { "enum": ["notarized", "not-applicable"] } } } },
+        { "if": { "properties": { "status": { "const": "not-configured" } } }, "then": { "properties": { "notarization_status": { "enum": ["not-configured", "not-applicable"] } } } },
+        { "if": { "properties": { "status": { "const": "failed" } } }, "then": { "properties": { "notarization_status": { "enum": ["failed", "not-applicable"] } } } }
+      ]
+    },
+    "inputs": { "type": "object", "additionalProperties": false, "required": ["root_cargo_lock_sha256", "desktop_cargo_lock_sha256", "npm_lock_sha256", "budget_sha256", "source_sha256"], "properties": { "root_cargo_lock_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "desktop_cargo_lock_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "npm_lock_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "budget_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "source_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } },
+    "source": { "type": "object", "additionalProperties": false, "required": ["dirty", "diff_sha256", "mutable"], "properties": { "dirty": { "type": "boolean" }, "diff_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "mutable": { "type": "boolean" } } },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_url"],
+      "properties": { "run_url": { "type": "string", "minLength": 1, "description": "Immutable release evidence uses a GitHub Actions run URL; explicitly mutable local evidence may use local." } }
+    }
+  }
+}

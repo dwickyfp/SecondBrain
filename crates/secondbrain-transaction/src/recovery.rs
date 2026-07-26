@@ -205,8 +205,16 @@ impl TransactionEngine {
                 continue;
             }
 
-            let note_path = self.workspace.resolve(&marker.path)?;
-            let source = fs::read_to_string(&note_path)?;
+            let note_path = self.workspace.resolve_read_only(&marker.path)?;
+            let source = match fs::read_to_string(&note_path) {
+                Ok(source) => source,
+                Err(error)
+                    if marker.creates_note && error.kind() == std::io::ErrorKind::NotFound =>
+                {
+                    String::new()
+                }
+                Err(error) => return Err(error.into()),
+            };
             let source_hash = ContentHash::digest(source.as_bytes());
             let materialized = if marker.materialized_hash == source_hash {
                 // The file is this transaction's own result, identified by the
@@ -216,6 +224,27 @@ impl TransactionEngine {
                 // to be idempotent, and a `ReplaceNode` anchors on the text it
                 // replaces, which its own post-state no longer contains.
                 source.clone()
+            } else if marker.creates_note
+                && source.is_empty()
+                && source_hash == marker.expected_hash
+            {
+                let Some(secondbrain_markdown::operation::SemanticOperation::InsertNode {
+                    content,
+                    ..
+                }) = operations.first()
+                else {
+                    actions.push(abandon(
+                        &mut marker,
+                        &marker_path,
+                        AbandonedReason::OperationsDoNotAnchor,
+                    )?);
+                    continue;
+                };
+                marker.state = "MATERIALIZING".to_owned();
+                persist_marker(&marker_path, &marker)?;
+                self.workspace
+                    .atomic_create(&marker.path, content.as_bytes())?;
+                content.clone()
             } else if source_hash == marker.expected_hash {
                 // The file is the recorded pre-state: finish the write.
                 let Ok(materialized) = apply_operations(&source, &operations) else {
@@ -228,8 +257,13 @@ impl TransactionEngine {
                 };
                 marker.state = "MATERIALIZING".to_owned();
                 persist_marker(&marker_path, &marker)?;
-                self.workspace
-                    .atomic_write(&marker.path, materialized.as_bytes())?;
+                if marker.creates_note {
+                    self.workspace
+                        .atomic_create(&marker.path, materialized.as_bytes())?;
+                } else {
+                    self.workspace
+                        .atomic_write(&marker.path, materialized.as_bytes())?;
+                }
                 materialized
             } else {
                 // Neither this transaction's own result nor the pre-state it

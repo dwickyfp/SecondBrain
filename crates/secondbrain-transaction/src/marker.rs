@@ -45,6 +45,8 @@ pub(crate) struct DurableState {
     pub(crate) expected_version: NoteVersion,
     pub(crate) committed_version: NoteVersion,
     pub(crate) index_repaired: bool,
+    #[serde(default)]
+    pub(crate) creates_note: bool,
 }
 
 impl DurableState {

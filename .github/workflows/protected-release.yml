@@ -1,0 +1,212 @@
+name: Protected desktop release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Protected package (${{ matrix.kind }})
+    environment: release-signing
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundle: dmg
+            extension: dmg
+            kind: macOS-DMG
+          - os: windows-latest
+            bundle: msi
+            extension: msi
+            kind: Windows-MSI
+          - os: ubuntu-latest
+            bundle: deb
+            extension: deb
+            kind: Linux-DEB
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Linux desktop and smoke dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev xvfb
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@ab40b01f54fe82bdf65693ea090a1e4942c136e7 # 1.91.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install pinned desktop dependencies
+        run: npm ci
+        working-directory: apps/desktop
+
+      - name: Record immutable build inputs
+        shell: bash
+        run: |
+          echo "SB_BUILD_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "SB_FIXTURE_SHA256=$(node apps/desktop/scripts/fixture-hash.mjs fixtures/markdown)" >> "$GITHUB_ENV"
+          echo "SB_TAURI_CLI=$(npm --prefix apps/desktop exec tauri -- --version)" >> "$GITHUB_ENV"
+          echo "SB_RUSTC=$(rustc --version)" >> "$GITHUB_ENV"
+          echo "SB_CI_RUN_URL=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Resolve macOS signing status
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if test -n "$APPLE_CERTIFICATE" && test -n "$APPLE_CERTIFICATE_PASSWORD" && test -n "$APPLE_SIGNING_IDENTITY" && test -n "$APPLE_ID" && test -n "$APPLE_PASSWORD" && test -n "$APPLE_TEAM_ID"; then
+            echo "SB_SIGNING_CONFIGURED=true" >> "$GITHUB_ENV"
+            echo "SB_SIGNING_STATUS=failed" >> "$GITHUB_ENV"
+            echo "SB_NOTARIZATION_STATUS=failed" >> "$GITHUB_ENV"
+            echo "SB_SIGNING_REASON=credentials are configured but native verification has not completed" >> "$GITHUB_ENV"
+          else
+            echo "Protected signed macOS release requires all Apple signing and notarization credentials" >&2
+            exit 1
+          fi
+
+      - name: Resolve Windows signing status
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          if ($env:WINDOWS_CERTIFICATE -and $env:WINDOWS_CERTIFICATE_PASSWORD -and $env:WINDOWS_TIMESTAMP_URL) {
+            $certificatePath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+            [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+            $securePassword = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword
+            $override = @{ bundle = @{ windows = @{ certificateThumbprint = $certificate.Thumbprint; digestAlgorithm = 'sha256'; timestampUrl = $env:WINDOWS_TIMESTAMP_URL } } } | ConvertTo-Json -Depth 5
+            $override | Set-Content (Join-Path $env:RUNNER_TEMP 'tauri-signing.json')
+            "SB_TAURI_CONFIG=$(Join-Path $env:RUNNER_TEMP 'tauri-signing.json')" | Out-File $env:GITHUB_ENV -Append
+            'SB_SIGNING_CONFIGURED=true' | Out-File $env:GITHUB_ENV -Append
+            'SB_SIGNING_STATUS=failed' | Out-File $env:GITHUB_ENV -Append
+            'SB_NOTARIZATION_STATUS=not-applicable' | Out-File $env:GITHUB_ENV -Append
+            'SB_SIGNING_REASON=credentials are configured but native verification has not completed' | Out-File $env:GITHUB_ENV -Append
+            "SB_WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File $env:GITHUB_ENV -Append
+          } else {
+            throw 'Protected signed Windows release requires certificate, password, and timestamp URL credentials'
+          }
+
+      - name: Resolve Linux signing status
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "SB_SIGNING_STATUS=not-configured" >> "$GITHUB_ENV"
+          echo "SB_NOTARIZATION_STATUS=not-applicable" >> "$GITHUB_ENV"
+          echo "SB_SIGNING_REASON=Linux protected signing is explicitly unsupported and not configured for this standalone DEB" >> "$GITHUB_ENV"
+
+      - name: Build protected package artifact
+        shell: bash
+        working-directory: apps/desktop
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          config=()
+          test -z "${SB_TAURI_CONFIG:-}" || config=(--config "$SB_TAURI_CONFIG")
+          npm run tauri -- build --bundles ${{ matrix.bundle }} "${config[@]}"
+
+      - name: Locate exact package artifact
+        shell: bash
+        run: node apps/desktop/scripts/locate-artifact.mjs apps/desktop/src-tauri/target/release/bundle/${{ matrix.bundle }} .${{ matrix.extension }} >> "$GITHUB_ENV"
+
+      - name: Verify macOS signature and notarization
+        if: runner.os == 'macOS' && env.SB_SIGNING_CONFIGURED == 'true'
+        shell: bash
+        run: |
+          mount_dir="$(mktemp -d)"
+          cleanup_macos_verification() {
+            hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
+            rmdir "$mount_dir" >/dev/null 2>&1 || true
+          }
+          trap cleanup_macos_verification EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$SB_EXACT_INSTALLER"
+          app="$mount_dir/SecondBrain.app"
+          if test -d "$app" && codesign --verify --deep --strict --verbose=2 "$app" && spctl --assess --type execute --verbose=2 "$app" && xcrun stapler validate "$app" && xcrun stapler validate "$SB_EXACT_INSTALLER"; then
+            echo "SB_SIGNING_STATUS=signed" >> "$GITHUB_ENV"
+            echo "SB_NOTARIZATION_STATUS=notarized" >> "$GITHUB_ENV"
+            echo "SB_SIGNING_REASON=codesign, spctl, and stapler validated the contained app; stapler also validated the exact DMG" >> "$GITHUB_ENV"
+          else
+            echo "SB_SIGNING_STATUS=failed" >> "$GITHUB_ENV"
+            echo "SB_NOTARIZATION_STATUS=failed" >> "$GITHUB_ENV"
+            echo "SB_SIGNING_REASON=native verification failed for the exact DMG" >> "$GITHUB_ENV"
+            echo "SB_SIGNING_VERIFICATION_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Verify Windows Authenticode signature
+        if: runner.os == 'Windows' && env.SB_SIGNING_CONFIGURED == 'true'
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature $env:SB_EXACT_INSTALLER
+          if ($signature.Status -eq 'Valid') {
+            'SB_SIGNING_STATUS=signed' | Out-File $env:GITHUB_ENV -Append
+            'SB_SIGNING_REASON=Get-AuthenticodeSignature validated the exact MSI' | Out-File $env:GITHUB_ENV -Append
+          } else {
+            'SB_SIGNING_STATUS=failed' | Out-File $env:GITHUB_ENV -Append
+            "SB_SIGNING_REASON=Authenticode verification failed for the exact MSI: $($signature.Status)" | Out-File $env:GITHUB_ENV -Append
+            'SB_SIGNING_VERIFICATION_FAILED=true' | Out-File $env:GITHUB_ENV -Append
+          }
+
+      - name: Smoke exact macOS DMG or extracted Linux DEB
+        if: runner.os != 'Windows'
+        shell: bash
+        run: apps/desktop/scripts/smoke-installer.sh "$SB_EXACT_INSTALLER" "$RUNNER_TEMP/readiness.json" "$RUNNER_TEMP/native-memory.json" "$SB_BUILD_COMMIT" "$SB_FIXTURE_SHA256"
+
+      - name: Smoke exact extracted Windows MSI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: apps/desktop/scripts/smoke-installer.ps1 -Artifact $env:SB_EXACT_INSTALLER -Marker "$env:RUNNER_TEMP/readiness.json" -Memory "$env:RUNNER_TEMP/native-memory.json" -Commit $env:SB_BUILD_COMMIT -FixtureSha256 $env:SB_FIXTURE_SHA256
+
+      - name: Generate and verify checksum and explicit status evidence
+        shell: bash
+        run: |
+          node apps/desktop/scripts/package-evidence.mjs "$SB_EXACT_INSTALLER" "artifacts/package-${{ matrix.bundle }}" "$RUNNER_TEMP/readiness.json" "$RUNNER_TEMP/native-memory.json"
+          node apps/desktop/scripts/verify-package.mjs "artifacts/package-${{ matrix.bundle }}/SHA256SUMS"
+        env:
+          SB_PLATFORM: ${{ runner.os }}
+          SB_INSTALLER_KIND: ${{ matrix.kind }}
+          SB_PERFORMANCE_MODE: hosted-ci-smoke-non-reference
+
+      - name: Upload protected exact installer and evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: secondbrain-protected-${{ matrix.bundle }}-${{ github.sha }}
+          path: artifacts/package-${{ matrix.bundle }}/
+          if-no-files-found: error
+
+      - name: Reject failed native signature verification
+        if: env.SB_SIGNING_VERIFICATION_FAILED == 'true'
+        shell: bash
+        run: exit 1
+
+      - name: Remove imported Windows signing material
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:SB_WINDOWS_CERTIFICATE_THUMBPRINT) {
+            Remove-Item "Cert:\CurrentUser\My\$env:SB_WINDOWS_CERTIFICATE_THUMBPRINT" -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'codesign.pfx') -Force -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'tauri-signing.json') -Force -ErrorAction SilentlyContinue

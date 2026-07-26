@@ -1,8 +1,11 @@
 use std::fs;
 use std::path::Path;
+use std::time::SystemTime;
 
 use secondbrain_core::id::NoteId;
-use secondbrain_index::{IndexConfig, IndexError, logical_dump, rebuild};
+use secondbrain_index::{
+    IndexConfig, IndexError, IndexHealth, ensure_index, index_health, logical_dump, rebuild,
+};
 use secondbrain_vault::WorkspaceRoot;
 use secondbrain_vault::base_snapshot::{BaseSnapshotStore, GENESIS_VERSION};
 use tempfile::tempdir;
@@ -91,6 +94,82 @@ fn repeated_rebuild_and_deleted_database_have_same_logical_dump() {
         first,
         logical_dump(dir.path().join(".secondbrain/index.sqlite")).unwrap()
     );
+}
+
+#[test]
+fn shared_health_contract_reuses_valid_and_rebuilds_missing_added_changed_and_deleted_notes() {
+    let dir = tempdir().unwrap();
+    plain_workspace(dir.path());
+    assert_eq!(
+        index_health(dir.path(), &IndexConfig::default()).unwrap(),
+        IndexHealth::Missing
+    );
+    assert!(
+        ensure_index(dir.path(), &IndexConfig::default())
+            .unwrap()
+            .rebuilt
+    );
+    assert_eq!(
+        index_health(dir.path(), &IndexConfig::default()).unwrap(),
+        IndexHealth::Valid
+    );
+    assert!(
+        !ensure_index(dir.path(), &IndexConfig::default())
+            .unwrap()
+            .rebuilt
+    );
+
+    fs::write(dir.path().join("notes/alpha.md"), "# Changed\n").unwrap();
+    assert_eq!(
+        index_health(dir.path(), &IndexConfig::default()).unwrap(),
+        IndexHealth::Stale
+    );
+    assert!(
+        ensure_index(dir.path(), &IndexConfig::default())
+            .unwrap()
+            .rebuilt
+    );
+    fs::write(dir.path().join("added.md"), "# Added\n").unwrap();
+    assert_eq!(
+        index_health(dir.path(), &IndexConfig::default()).unwrap(),
+        IndexHealth::Stale
+    );
+    ensure_index(dir.path(), &IndexConfig::default()).unwrap();
+    fs::remove_file(dir.path().join("added.md")).unwrap();
+    assert_eq!(
+        index_health(dir.path(), &IndexConfig::default()).unwrap(),
+        IndexHealth::Stale
+    );
+}
+
+#[test]
+fn valid_index_reuse_performs_no_rebuild_sidecar_writes() {
+    let dir = tempdir().unwrap();
+    plain_workspace(dir.path());
+    ensure_index(dir.path(), &IndexConfig::default()).unwrap();
+    let before = rebuild_sidecar_modified_times(dir.path());
+
+    let report = ensure_index(dir.path(), &IndexConfig::default()).unwrap();
+
+    assert!(!report.rebuilt);
+    assert_eq!(rebuild_sidecar_modified_times(dir.path()), before);
+}
+
+fn rebuild_sidecar_modified_times(root: &Path) -> Vec<(String, SystemTime)> {
+    ["identity-map", "crdt"]
+        .into_iter()
+        .flat_map(|directory| {
+            fs::read_dir(root.join(".secondbrain").join(directory))
+                .unwrap()
+                .map(move |entry| {
+                    let entry = entry.unwrap();
+                    (
+                        format!("{directory}/{}", entry.file_name().to_string_lossy()),
+                        entry.metadata().unwrap().modified().unwrap(),
+                    )
+                })
+        })
+        .collect()
 }
 
 #[test]

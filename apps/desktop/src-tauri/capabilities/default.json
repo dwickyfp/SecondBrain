@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Core capability for the main SecondBrain window.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:allow-open"]
 }

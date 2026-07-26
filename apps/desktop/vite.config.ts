@@ -8,6 +8,9 @@ export default defineConfig({
     conditions: ['browser']
   },
   server: {
+    fs: {
+      allow: ['.', '../../fixtures/markdown']
+    },
     port: 1420,
     strictPort: true
   },

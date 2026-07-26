@@ -54,6 +54,13 @@ jobs:
           mkdir -p artifacts
           cargo test --locked -p secondbrain-cli --test e2e_phase0 -- --nocapture 2>&1 | tee "artifacts/e2e-${{ runner.os }}.log"
 
+      - name: Cross-platform crash and recovery boundary
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/recovery
+          cargo test --locked -p secondbrain-diagnostics --test recovery_boundary -- --nocapture 2>&1 | tee "artifacts/recovery/recovery-${{ runner.os }}.log"
+
       - name: Benchmark smoke request
         shell: bash
         run: |
@@ -118,9 +125,33 @@ jobs:
         run: npm test
         working-directory: apps/desktop
 
+      - name: Test packaging and evidence scripts
+        run: npm run scripts:test
+        working-directory: apps/desktop
+
+      - name: Gate editor Markdown survival
+        run: npm run editor:survival
+        working-directory: apps/desktop
+
       - name: Build frontend
         run: npm run build
         working-directory: apps/desktop
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/desktop
+
+      - name: Keyboard and accessibility browser E2E
+        run: npm run e2e
+        working-directory: apps/desktop
+
+      - name: Upload Playwright reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: task-48-playwright-chromium
+          path: apps/desktop/artifacts/playwright/
+          if-no-files-found: warn
 
       - name: Audit frontend dependencies
         run: npm audit --audit-level=high
@@ -166,3 +197,144 @@ jobs:
       - name: Test desktop backend
         run: cargo test --locked
         working-directory: apps/desktop/src-tauri
+
+  desktop-performance-smoke:
+    name: Desktop performance smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+          - ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@ab40b01f54fe82bdf65693ea090a1e4942c136e7 # 1.91.1
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Run hosted smoke benchmark
+        shell: bash
+        env:
+          SECONDBRAIN_BENCH_ENV: github-hosted-${{ runner.os }}-${{ runner.arch }}
+          SECONDBRAIN_BENCH_CLASSIFICATION: hosted-ci-smoke-non-reference
+        run: |
+          mkdir -p apps/desktop/artifacts/performance
+          cargo run --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --features benchmark-binaries --bin desktop-performance -- 100 2 20 > "apps/desktop/artifacts/performance/hosted-${{ runner.os }}-${{ runner.arch }}.json"
+
+      - name: Upload raw performance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-performance-smoke-${{ runner.os }}-${{ runner.arch }}
+          path: apps/desktop/artifacts/performance/
+          if-no-files-found: error
+
+  desktop-package:
+    name: Unsigned package artifact (${{ matrix.kind }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundle: dmg
+            extension: dmg
+            kind: macOS-DMG
+          - os: windows-latest
+            bundle: msi
+            extension: msi
+            kind: Windows-MSI
+          - os: ubuntu-latest
+            bundle: deb
+            extension: deb
+            kind: Linux-DEB
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Linux desktop and smoke dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev xvfb
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@ab40b01f54fe82bdf65693ea090a1e4942c136e7 # 1.91.1
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install pinned desktop dependencies
+        run: npm ci
+        working-directory: apps/desktop
+
+      - name: Record immutable build inputs
+        shell: bash
+        run: |
+          echo "SB_BUILD_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "SB_FIXTURE_SHA256=$(node apps/desktop/scripts/fixture-hash.mjs fixtures/markdown)" >> "$GITHUB_ENV"
+          echo "SB_TAURI_CLI=$(npm --prefix apps/desktop exec tauri -- --version)" >> "$GITHUB_ENV"
+          echo "SB_RUSTC=$(rustc --version)" >> "$GITHUB_ENV"
+          echo "SB_CI_RUN_URL=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Build one native unsigned package artifact
+        run: npm run tauri -- build --bundles ${{ matrix.bundle }}
+        working-directory: apps/desktop
+        env:
+          SB_BUILD_COMMIT: ${{ env.SB_BUILD_COMMIT }}
+          SB_FIXTURE_SHA256: ${{ env.SB_FIXTURE_SHA256 }}
+
+      - name: Locate exact package artifact
+        shell: bash
+        run: node apps/desktop/scripts/locate-artifact.mjs apps/desktop/src-tauri/target/release/bundle/${{ matrix.bundle }} .${{ matrix.extension }} >> "$GITHUB_ENV"
+
+      - name: Smoke exact macOS DMG or extracted Linux DEB
+        if: runner.os != 'Windows'
+        shell: bash
+        run: apps/desktop/scripts/smoke-installer.sh "$SB_EXACT_INSTALLER" "$RUNNER_TEMP/readiness.json" "$RUNNER_TEMP/native-memory.json" "$SB_BUILD_COMMIT" "$SB_FIXTURE_SHA256"
+
+      - name: Smoke exact extracted Windows MSI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: apps/desktop/scripts/smoke-installer.ps1 -Artifact $env:SB_EXACT_INSTALLER -Marker "$env:RUNNER_TEMP/readiness.json" -Memory "$env:RUNNER_TEMP/native-memory.json" -Commit $env:SB_BUILD_COMMIT -FixtureSha256 $env:SB_FIXTURE_SHA256
+
+      - name: Generate and verify checksum and evidence
+        shell: bash
+        run: |
+          node apps/desktop/scripts/package-evidence.mjs "$SB_EXACT_INSTALLER" "artifacts/package-${{ matrix.bundle }}" "$RUNNER_TEMP/readiness.json" "$RUNNER_TEMP/native-memory.json"
+          node apps/desktop/scripts/verify-package.mjs "artifacts/package-${{ matrix.bundle }}/SHA256SUMS"
+        env:
+          SB_PLATFORM: ${{ runner.os }}
+          SB_INSTALLER_KIND: ${{ matrix.kind }}
+          SB_SIGNING_STATUS: unsigned
+          SB_NOTARIZATION_STATUS: not-applicable
+          SB_SIGNING_REASON: ordinary CI intentionally produces unsigned installers
+          SB_PERFORMANCE_MODE: hosted-ci-smoke-non-reference
+
+      - name: Upload exact package artifact and evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: secondbrain-unsigned-${{ matrix.bundle }}-${{ github.sha }}
+          path: artifacts/package-${{ matrix.bundle }}/
+          if-no-files-found: error

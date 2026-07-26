@@ -1,0 +1,643 @@
+{
+  "schema": "secondbrain-editor-gate-evidence-v1",
+  "generated_at": "2026-07-26T08:40:14.289Z",
+  "provenance": {
+    "capture_status": "unavailable-for-legacy-run",
+    "immutable": false,
+    "classification": "mutable-legacy-local-observation-not-completion",
+    "reason": "git revision, dirty diff, lock, budget, and source hashes were not captured when this run was measured; current hashes cannot be backfilled without misrepresenting the historical source"
+  },
+  "environment": {
+    "name": "local-macos-arm64-2026-07-26",
+    "platform": "darwin",
+    "release": "25.5.0",
+    "arch": "arm64",
+    "cpu": "Apple M3",
+    "logical_cpus": 8,
+    "total_memory_bytes": 17179869184,
+    "node": "v22.22.3",
+    "rustc": "rustc 1.91.1 (ed61e7d7e 2025-11-07)"
+  },
+  "commands": {
+    "correctness": "npm run editor:gate",
+    "benchmark": "SECONDBRAIN_BENCH_ENV=local-macos-arm64-2026-07-26 npm run editor:benchmark -- ../../docs/evidence/phase-1-editor-gate.json"
+  },
+  "correctness": {
+    "passed": true,
+    "fixture_count": 51,
+    "fixture_manifest_sha256": "6cdd31a57c6fd18216690dea2b2df8fda5701b647f1fdc5a3b84895f71c5779b",
+    "frontend_projection_gate": {
+      "passed": true,
+      "fixtures": 51
+    },
+    "rust_preview_apply_gate": {
+      "passed": true,
+      "no_op_fixtures": 49,
+      "expected_index_rejections": [
+        {
+          "path": "frontmatter/duplicate_id.md",
+          "reason": "duplicate YAML entry"
+        },
+        {
+          "path": "frontmatter/malformed.md",
+          "reason": "malformed YAML frontmatter"
+        }
+      ],
+      "rejected_fixture_bytes_untouched": true
+    },
+    "fixtures": [
+      {
+        "path": "fixtures/markdown/commonmark/README.md",
+        "bytes": 612,
+        "sha256": "d8debb96c766e87cb0c25e2bb81100b96f78f141a95df693ef6187636f3c460f"
+      },
+      {
+        "path": "fixtures/markdown/commonmark/blockquotes.md",
+        "bytes": 225,
+        "sha256": "e7d1e3558efdd8de6646835282424a27b0ede34749c3c1d1ff6eb08136fe7254"
+      },
+      {
+        "path": "fixtures/markdown/commonmark/code-blocks.md",
+        "bytes": 216,
+        "sha256": "c30f5e277fb670b2fe9ee5a9659ddde57fc54bf3d25f88e9c0bd697b81cfdc19"
+      },
+      {
+        "path": "fixtures/markdown/commonmark/crlf.md",
+        "bytes": 121,
+        "sha256": "8a2a82a5c379393e8b2b67883b3c0bf951b3b5a198bf7f2706a0caf227002e0b"
+      },
+      {
+        "path": "fixtures/markdown/commonmark/empty-frontmatter.md",
+        "bytes": 34,
+        "sha256": "430493fc47ffd967dbc6edfc23d1ef16b2ed6d0c80b439523d9d6461f7bad10b"
+      },
+      {
+        "path": "fixtures/markdown/commonmark/frontmatter.md",
+        "bytes": 75,
+        "sha256": "ff8b4a7bfb3c18263000721e47e02957fd96b9cbca1dd4647c1d3d949523d23f"
+      },
+      {
+        "path": "fixtures/markdown/commonmark/headings.md",
+        "bytes": 155,
+        "sha256": "f0012a976a9e063fb99f83da5fbc623d6f589ba53c3fd5677a7cab250a596e8f"
+      },
+      {
+        "path": "fixtures/markdown/commonmark/lists.md",
+        "bytes": 371,
+        "sha256": "fbae4540cc13e7675d2ec932bbb7fb2a31763bcc9258d0a6f363fae158f0ec10"
+      },
+      {
+        "path": "fixtures/markdown/commonmark/paragraphs.md",
+        "bytes": 218,
+        "sha256": "d3ad70a282e3d2cb58404f3835aa63ded7f43e07f0f7eb16331d98d8556c7a45"
+      },
+      {
+        "path": "fixtures/markdown/commonmark/unicode.md",
+        "bytes": 266,
+        "sha256": "7e8c2d76c737fcae845a7b80b7fea53b31ed691225c6dbbdf50ad659f6b6dbdd"
+      },
+      {
+        "path": "fixtures/markdown/edge/deep-nesting.md",
+        "bytes": 136,
+        "sha256": "30fbec78cc6ca9e77cc8e2f447899921e88f88fd337faa618dcb8d1f367a3bd3"
+      },
+      {
+        "path": "fixtures/markdown/edge/empty.md",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "fixtures/markdown/edge/html-blocks.md",
+        "bytes": 158,
+        "sha256": "8c20a298fa0580bd5c98c4051718212e9773e5eedfff8f0c7ea74b0b92ad5dc1"
+      },
+      {
+        "path": "fixtures/markdown/edge/math.md",
+        "bytes": 252,
+        "sha256": "c80a335e8c0f9798011ecfd3e2701c4428bd641491b81d53624fa982b1c75434"
+      },
+      {
+        "path": "fixtures/markdown/edge/unicode-extreme.md",
+        "bytes": 444,
+        "sha256": "1aac6af9924c55db7fd8ed720e01e6e6a4ee07f18bad6b783c069caf7a53a74e"
+      },
+      {
+        "path": "fixtures/markdown/edge/whitespace.md",
+        "bytes": 10,
+        "sha256": "d52b98a80644c4574cbdcd867ba807a24540b240009a9f69f09e59611df08439"
+      },
+      {
+        "path": "fixtures/markdown/extract/combined.md",
+        "bytes": 193,
+        "sha256": "0aeb68518f6669b0bb2ceb6011219923677944217511dfc9b1376613a080b924"
+      },
+      {
+        "path": "fixtures/markdown/extract/empty.md",
+        "bytes": 57,
+        "sha256": "619f9cfe6bc3cfc48220aa40ae3b2a2c43b40a0e58bdb5463639ddec7e34cf9f"
+      },
+      {
+        "path": "fixtures/markdown/extract/headings.md",
+        "bytes": 101,
+        "sha256": "49cca93bd7a4f400b99d7b68f95ed821b664988f0f7346fb4d839485484e7120"
+      },
+      {
+        "path": "fixtures/markdown/extract/ignored.md",
+        "bytes": 121,
+        "sha256": "a9397485747bef306039138170295a599d4c49d9d47c70dcb702a20a14181442"
+      },
+      {
+        "path": "fixtures/markdown/extract/properties.md",
+        "bytes": 110,
+        "sha256": "a1a256753dbad2d763aa23cfb4d3147287357496f097fb2e76dbca93fb0724f5"
+      },
+      {
+        "path": "fixtures/markdown/extract/tasks.md",
+        "bytes": 105,
+        "sha256": "a4df006e00703d0876703e649cd9b07c5930aecae06071a560162e9516ed6e12"
+      },
+      {
+        "path": "fixtures/markdown/extract/unicode_tags.md",
+        "bytes": 135,
+        "sha256": "af620184a41f1ce43599cd6a9cf6119d0368923c637d55fb3d4dd24b9676391c"
+      },
+      {
+        "path": "fixtures/markdown/extract/wikilinks.md",
+        "bytes": 140,
+        "sha256": "ee8e4d44a17e4499ca9a848e047649bb22d69805b9112b7a5c8331a8ea615327"
+      },
+      {
+        "path": "fixtures/markdown/frontmatter/body_with_dashes.md",
+        "bytes": 42,
+        "sha256": "04a1ca984fb41a81538a73176cf08ba8b29207771abb5bc11895c1b2940adb61"
+      },
+      {
+        "path": "fixtures/markdown/frontmatter/bom_prefix.md",
+        "bytes": 44,
+        "sha256": "ad8ad60b643b5136ee1315e511c408f2334f4078c4ae964451ecbdb2e61ff8df"
+      },
+      {
+        "path": "fixtures/markdown/frontmatter/comments_quoted.md",
+        "bytes": 81,
+        "sha256": "05d9131c5217dbd538423c497252923f4c9e106476a0e3dff2f9ece6074ecb86"
+      },
+      {
+        "path": "fixtures/markdown/frontmatter/crlf_frontmatter.md",
+        "bytes": 47,
+        "sha256": "52f33aa2637e00b05de126bffc10285682f3975460398f48638cd477f1d283ab"
+      },
+      {
+        "path": "fixtures/markdown/frontmatter/duplicate_id.md",
+        "bytes": 77,
+        "sha256": "0091835beda14c7e23c093407b82e85bce2f7d006beef5dcdaf0ec4806b14595"
+      },
+      {
+        "path": "fixtures/markdown/frontmatter/existing_id.md",
+        "bytes": 60,
+        "sha256": "f2c423daeecb224bb90f40b7f85f91e0557c12dccd6fa7dea2be6b0a2f888e98"
+      },
+      {
+        "path": "fixtures/markdown/frontmatter/malformed.md",
+        "bytes": 40,
+        "sha256": "335517e3ac30d1bcebdbd0a68778ad5c9ed1bd4ab64f5e15b078183438b46108"
+      },
+      {
+        "path": "fixtures/markdown/frontmatter/no_frontmatter.md",
+        "bytes": 51,
+        "sha256": "ecfe68594b3afffe136c69f147c58a96cbcf61f2d41bfb3ebeaa61839ec3d178"
+      },
+      {
+        "path": "fixtures/markdown/frontmatter/valid_yaml.md",
+        "bytes": 85,
+        "sha256": "73ff2d90b08358ac437e9ddf04d98a9980bee01a206cdcb0e1c25b61792eeac6"
+      },
+      {
+        "path": "fixtures/markdown/gfm/autolinks.md",
+        "bytes": 246,
+        "sha256": "7bc772935d502ba2e338d775a6909502ceab9b650a03593f90024af1305795cc"
+      },
+      {
+        "path": "fixtures/markdown/gfm/combined.md",
+        "bytes": 369,
+        "sha256": "1a51cf282056b69ddb2585f77ec8b6477875fd3b540081001755f6497b5759f7"
+      },
+      {
+        "path": "fixtures/markdown/gfm/strikethrough.md",
+        "bytes": 162,
+        "sha256": "3dbc98a6c566bd36bfce080871cd8d15e632fb210a8eac3b2ef95fd121fd8da9"
+      },
+      {
+        "path": "fixtures/markdown/gfm/tables.md",
+        "bytes": 275,
+        "sha256": "d499e603fd7cbe5ed2c1df1c1505c549747322fb16cd0700b0edc0caf233ccdc"
+      },
+      {
+        "path": "fixtures/markdown/gfm/task-lists.md",
+        "bytes": 138,
+        "sha256": "ce7d42eeb4c16311e83c159756536992213b8e7b268d1a1ad92a2679d5d6d13b"
+      },
+      {
+        "path": "fixtures/markdown/obsidian-vault/inbox.md",
+        "bytes": 92,
+        "sha256": "bfb61a1bd13d0c08cdf8934d375460583ce6d6e2aa88df5dbc185e3b58442a50"
+      },
+      {
+        "path": "fixtures/markdown/obsidian-vault/projects/phase-zero.md",
+        "bytes": 322,
+        "sha256": "4455c775739c0b38b5b863265f721d3fbb3a55db08756a09a384c0b34f5712d9"
+      },
+      {
+        "path": "fixtures/markdown/obsidian-vault/reference/recovery-runbook.md",
+        "bytes": 174,
+        "sha256": "d150808ec80f44a12678a1e3530e13eb4b480bf8ef0bf6d7ee8cb1f7c9e31275"
+      },
+      {
+        "path": "fixtures/markdown/obsidian/callouts.md",
+        "bytes": 304,
+        "sha256": "be081f7497f6966ccc1b43cc03eb52c3ae325ac624f9478be9ff5642375c86ee"
+      },
+      {
+        "path": "fixtures/markdown/obsidian/combined.md",
+        "bytes": 500,
+        "sha256": "b12a45cdba0219bef6fcf69ef74352ef679833747372839ae0c2f2a8d999bdc8"
+      },
+      {
+        "path": "fixtures/markdown/obsidian/tags.md",
+        "bytes": 250,
+        "sha256": "40f150e559f9e33673997dfa25e34e41399bd7f824e0dfb4f2c9800b32669b55"
+      },
+      {
+        "path": "fixtures/markdown/obsidian/wikilinks.md",
+        "bytes": 285,
+        "sha256": "de133db769f1dee80ee79ac7b8e0d690fa5843bbfd38e708208cd28aedd4bd7f"
+      },
+      {
+        "path": "fixtures/markdown/source-preservation/crlf.md",
+        "bytes": 38,
+        "sha256": "5e6ddb644f4eef2e9d24b838e0e0f297679d04ce4694aeb4ab849bce1b25b58d"
+      },
+      {
+        "path": "fixtures/markdown/source-preservation/lf.md",
+        "bytes": 33,
+        "sha256": "2204608ff871feaf15f4d45541e56864ae0d4ed59d5edc5163e6ad1017bbfe96"
+      },
+      {
+        "path": "fixtures/markdown/source-preservation/mixed.md",
+        "bytes": 433,
+        "sha256": "2f3ab80eedd38c551f9c0a1d11297963a13bd63adbc73a283cc2332e74576ce0"
+      },
+      {
+        "path": "fixtures/markdown/workspace-small/a.md",
+        "bytes": 90,
+        "sha256": "e81261c0dd928da17f4e27227801743bb676a430735df2e27f03bf9361d7abd4"
+      },
+      {
+        "path": "fixtures/markdown/workspace-small/b.md",
+        "bytes": 80,
+        "sha256": "853e8a965d056c8c3bf033bf1fbcd359f50ee6969f70142509abb81153b101d9"
+      },
+      {
+        "path": "fixtures/markdown/workspace-small/nested/c.md",
+        "bytes": 60,
+        "sha256": "76f36694e6a726e96865f7fae84559481dadcaf5f69eccdce7851a7b4e43ccf9"
+      }
+    ]
+  },
+  "measurements": {
+    "local_keystroke_session_synchronization": {
+      "budget_ms_exclusive": 16,
+      "budget_observation_passed": true,
+      "percentiles_ms": {
+        "p50": 0.0003749999996216502,
+        "p95": 0.003374999999323336,
+        "p99": 0.09275000000070577,
+        "max": 0.4090409999998883
+      },
+      "raw_samples_ms": [
+        0.09275000000070577,
+        0.004167000000052212,
+        0.0020839999997406267,
+        0.0019160000001647859,
+        0.0024169999996956903,
+        0.0018749999999272404,
+        0.0018340000005991897,
+        0.0030000000006111804,
+        0.008166999999957625,
+        0.006000000000312866,
+        0.0014590000000680448,
+        0.0027090000003227033,
+        0.0010830000001078588,
+        0.0009579999996276456,
+        0.0009579999996276456,
+        0.0009170000002995948,
+        0.0009159999999610591,
+        0.0009579999996276456,
+        0.0009579999996276456,
+        0.0009159999999610591,
+        0.0009580000005371403,
+        0.0009579999996276456,
+        0.0009159999999610591,
+        0.001291999999921245,
+        0.001208000000588072,
+        0.002124999999978172,
+        0.0009589999999661813,
+        0.0009170000002995948,
+        0.0009160000008705538,
+        0.0009589999999661813,
+        0.0009159999999610591,
+        0.0009170000002995948,
+        0.0009170000002995948,
+        0.0009159999999610591,
+        0.0009170000002995948,
+        0.0009169999993901001,
+        0.0009170000002995948,
+        0.0009159999999610591,
+        0.0009170000002995948,
+        0.4090409999998883,
+        0.0021669999996447586,
+        0.0010419999998703133,
+        0.0009159999999610591,
+        0.003374999999323336,
+        0.0029580000000350992,
+        0.0010830000001078588,
+        0.0010000000002037268,
+        0.0006669999993391684,
+        0.0003749999996216502,
+        0.0003749999996216502,
+        0.0003329999999550637,
+        0.00033400000029359944,
+        0.0003749999996216502,
+        0.0003329999999550637,
+        0.0003329999999550637,
+        0.0003329999999550637,
+        0.00029100000028847717,
+        0.00029100000028847717,
+        0.0003329999999550637,
+        0.0002920000006270129,
+        0.0002920000006270129,
+        0.00033400000029359944,
+        0.00033399999938410474,
+        0.00033399999938410474,
+        0.0002919999997175182,
+        0.00033400000029359944,
+        0.00029100000028847717,
+        0.00029100000028847717,
+        0.00029100000028847717,
+        0.0003329999999550637,
+        0.00033400000029359944,
+        0.0002919999997175182,
+        0.00033400000029359944,
+        0.0002919999997175182,
+        0.0002919999997175182,
+        0.0003329999999550637,
+        0.00029100000028847717,
+        0.00029099999937898247,
+        0.0002920000006270129,
+        0.0002920000006270129,
+        0.00033399999938410474,
+        0.0002919999997175182,
+        0.0003329999999550637,
+        0.00029100000028847717,
+        0.0003329999999550637,
+        0.0002919999997175182,
+        0.0002920000006270129,
+        0.00033400000029359944,
+        0.0002919999997175182,
+        0.00029100000028847717,
+        0.00029100000028847717,
+        0.0003329999999550637,
+        0.0002920000006270129,
+        0.0002919999997175182,
+        0.00033399999938410474,
+        0.00033399999938410474,
+        0.00033400000029359944,
+        0.0002920000006270129,
+        0.00033400000029359944,
+        0.0002919999997175182
+      ]
+    },
+    "rust_transaction_preview": {
+      "percentiles_ms": {
+        "p50": 1.932,
+        "p95": 3.43,
+        "p99": 10.865,
+        "max": 11.186
+      },
+      "raw_samples_ms": [
+        0.857,
+        1.995,
+        3.43,
+        1.271,
+        10.865,
+        2.728,
+        1.407,
+        1.023,
+        3.776,
+        2.586,
+        1.214,
+        11.186,
+        1.329,
+        1.027,
+        1.842,
+        2.237,
+        2.222,
+        2.279,
+        3.766,
+        2.239,
+        1.621,
+        2.07,
+        1.853,
+        1.84,
+        1.705,
+        0.914,
+        1.479,
+        1.409,
+        1.246,
+        3.216,
+        1.085,
+        1.266,
+        1.201,
+        1.426,
+        2.942,
+        1.457,
+        1.215,
+        1.387,
+        1.871,
+        1.932,
+        1.937,
+        1.6,
+        1.725,
+        1.385,
+        1.436,
+        1.947,
+        1.703,
+        2.133,
+        1.872,
+        1.576,
+        1.221,
+        1.32,
+        1.24,
+        1.305,
+        1.987,
+        1.986,
+        2.368,
+        1.809,
+        1.531,
+        1.766,
+        2.203,
+        2.155,
+        2.062,
+        2.156,
+        1.953,
+        2.015,
+        1.502,
+        1.6,
+        2.059,
+        1.459,
+        1.639,
+        1.467,
+        1.578,
+        2.059,
+        1.414,
+        1.619,
+        1.842,
+        1.907,
+        2.047,
+        2.78,
+        2.392,
+        2.379,
+        2.274,
+        2.516,
+        2.464,
+        2.684,
+        2.244,
+        2.135,
+        2.323,
+        1.457,
+        2.502,
+        2.813,
+        2.097,
+        3.962,
+        1.963,
+        2.077,
+        2.265,
+        2.031,
+        2.002,
+        2.869
+      ]
+    },
+    "rust_transaction_materialization": {
+      "budget_ms_exclusive": 100,
+      "budget_observation_passed": true,
+      "percentiles_ms": {
+        "p50": 74.523,
+        "p95": 92.615,
+        "p99": 170.501,
+        "max": 181.657
+      },
+      "raw_samples_ms": [
+        65.07,
+        61.917,
+        63.935,
+        85.313,
+        68.035,
+        68.806,
+        67.013,
+        107.878,
+        181.657,
+        85.182,
+        87.456,
+        170.501,
+        82.598,
+        76.306,
+        92.615,
+        93.554,
+        78.232,
+        88.574,
+        70.837,
+        67.142,
+        74.379,
+        74.523,
+        72.075,
+        68.104,
+        71.133,
+        62.594,
+        67.115,
+        68.762,
+        79.233,
+        65.157,
+        67.692,
+        76.695,
+        87.791,
+        68.597,
+        62.236,
+        74.322,
+        73.867,
+        66.659,
+        77.512,
+        68.671,
+        71.937,
+        75.627,
+        75.385,
+        78.489,
+        71.641,
+        73.954,
+        75.129,
+        79.027,
+        78.727,
+        72.953,
+        66.536,
+        66.991,
+        78.123,
+        143.983,
+        83.244,
+        79.77,
+        71.701,
+        74.183,
+        75.268,
+        70.446,
+        81.804,
+        78.714,
+        71.879,
+        72.822,
+        85.166,
+        76.975,
+        74.265,
+        70.238,
+        77.14,
+        82.257,
+        78.218,
+        77.613,
+        64.679,
+        68.556,
+        81.978,
+        71.034,
+        86.732,
+        77.258,
+        71.496,
+        74.996,
+        69.523,
+        78.777,
+        73.403,
+        77.753,
+        72.577,
+        89.095,
+        86.846,
+        73.79,
+        72.48,
+        77.878,
+        80.323,
+        78.313,
+        75.677,
+        73.833,
+        74.509,
+        79.85,
+        73.411,
+        75.97,
+        74.053,
+        76.932
+      ]
+    }
+  },
+  "release_budget_caveat": "These wall-clock observations are a local named-environment baseline, not a hard release gate. Correctness is enforced in CI; absolute latency release budgets require repeated measurements on named reference hardware without hosted-runner contention."
+}

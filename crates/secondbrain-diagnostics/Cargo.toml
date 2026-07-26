@@ -1,0 +1,23 @@
+[package]
+name = "secondbrain-diagnostics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+secondbrain-core = { path = "../secondbrain-core" }
+secondbrain-index = { path = "../secondbrain-index" }
+secondbrain-transaction = { path = "../secondbrain-transaction" }
+secondbrain-vault = { path = "../secondbrain-vault" }
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+secondbrain-core = { path = "../secondbrain-core" }
+secondbrain-markdown = { path = "../secondbrain-markdown" }
+serde_json.workspace = true
+tempfile.workspace = true

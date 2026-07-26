@@ -6,11 +6,15 @@
 //! will exercise. A second write path or a reimplemented diff living here would
 //! be a path nothing else uses, and therefore a path nothing else tests.
 
+pub mod create;
 pub mod diff;
 pub mod doctor;
+pub mod graph;
+pub mod import;
 pub mod index;
 pub mod init;
 pub mod note;
+pub mod property;
 pub mod reconcile;
 pub mod recovery;
 pub mod search;

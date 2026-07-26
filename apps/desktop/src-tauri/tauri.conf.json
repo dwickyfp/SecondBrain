@@ -3,6 +3,7 @@
   "productName": "SecondBrain",
   "version": "0.1.0",
   "identifier": "dev.secondbrain.desktop",
+  "mainBinaryName": "secondbrain-desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -25,6 +26,11 @@
     }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "targets": ["dmg", "msi", "deb"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "category": "Productivity",
+    "shortDescription": "A local-first personal knowledge workspace",
+    "longDescription": "SecondBrain is a local-first desktop workspace for notes, search, links, and safe transactions."
   }
 }

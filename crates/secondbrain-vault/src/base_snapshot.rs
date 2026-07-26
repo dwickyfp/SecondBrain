@@ -250,6 +250,44 @@ impl BaseSnapshotStore {
         self.save(note_id, path, GENESIS_VERSION, source).map(Some)
     }
 
+    /// Ensures independent genesis records with bounded parallel filesystem
+    /// durability waits. Each note still follows [`Self::ensure_genesis`], so
+    /// existing bases are never replaced and every successful return is fully
+    /// durable.
+    pub fn ensure_genesis_batch(
+        &self,
+        notes: &[(NoteId, WorkspacePath, String)],
+    ) -> Result<(), SnapshotError> {
+        if notes.is_empty() {
+            return Ok(());
+        }
+        let workers = std::thread::available_parallelism()
+            .map_or(1, usize::from)
+            .min(notes.len());
+        let chunk_size = notes.len().div_ceil(workers);
+        std::thread::scope(|scope| {
+            let handles = notes
+                .chunks(chunk_size)
+                .map(|chunk| {
+                    scope.spawn(|| {
+                        let store = Self::new(&self.workspace);
+                        chunk.iter().try_for_each(|(id, path, source)| {
+                            store.ensure_genesis(*id, path, source).map(|_| ())
+                        })
+                    })
+                })
+                .collect::<Vec<_>>();
+            for handle in handles {
+                handle.join().map_err(|_| {
+                    SnapshotError::Crdt(secondbrain_crdt::Error::Io(std::io::Error::other(
+                        "genesis writer panicked",
+                    )))
+                })??;
+            }
+            Ok(())
+        })
+    }
+
     /// Moves an existing base to the path its note now occupies.
     ///
     /// Only the location changes. The source, hash and version stay exactly as

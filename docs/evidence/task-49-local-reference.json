@@ -1,0 +1,163 @@
+{
+  "schema": "secondbrain-desktop-performance-v1",
+  "generated_at_unix_seconds": 1785063830,
+  "classification": "mutable-legacy-local-reference-not-completion",
+  "provenance": {
+    "capture_status": "unavailable-for-legacy-run",
+    "immutable": false,
+    "reason": "git revision, dirty diff, lock, budget, and source hashes were not captured when this run was measured; current hashes cannot be backfilled without misrepresenting the historical source"
+  },
+  "command": "SECONDBRAIN_BENCH_ENV=apple-m3-8cpu-16gb-macos-26.5 SECONDBRAIN_BENCH_CLASSIFICATION=local-reference cargo run --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --bin desktop-performance -- 10000 2 20",
+  "fixture": {
+    "generator": "secondbrain-deterministic-vault-v1",
+    "notes": 10000,
+    "bytes": 1290000,
+    "content_blake3": "2ed16450de74b45a5f2f7a795d2c07d495c42c6b823f77d991b1db4ba5396ce8"
+  },
+  "environment": {
+    "label": "apple-m3-8cpu-16gb-macos-26.5",
+    "os": "macos",
+    "arch": "aarch64",
+    "rustc": "rustc 1.91.1 (ed61e7d7e 2025-11-07)",
+    "cpu": "Apple M3",
+    "logical_cpus": 8,
+    "tool_blake3": "c2d2d6202b387c29bfda6faadad320a4dfb3c6f2d6f634c4db6efaa51cc413a8",
+    "environment_blake3": "80ff19a56a2a2850921cebf9c7db56bcc77c913b2ea3c6b2eaf68326f1c21d77"
+  },
+  "methodology": {
+    "timing_clock": "std::time::Instant wall time; fixture generation excluded",
+    "percentile": "nearest-rank: sorted[ceil(p*n)-1]",
+    "first_index": "fresh initialized deterministic vault per raw sample; production open_workspace_at includes missing-index health check and rebuild",
+    "indexed_startup": "repeated production open_workspace_at on unchanged valid index; includes full correctness-preserving path and content-hash health validation",
+    "search": "production search_workspace_at; opens SQLite and executes FTS5 query with exactly one expected hit",
+    "open_note": "production read_note_at; opens SQLite, resolves indexed identity, reads Markdown and converged-base version",
+    "memory": "RSS sampled after operations for this release benchmark/backend process, including loaded Rust backend and fixture-processing allocations; Linux /proc/self/status VmRSS, macOS ps -o rss= -p PID, Windows PowerShell WorkingSet64; not idle and not a packaged native application",
+    "native_app_measured": false
+  },
+  "measurements": {
+    "first_index_us": {
+      "unit": "microseconds",
+      "samples": [
+        105316717,
+        109958557
+      ],
+      "p50": 105316717,
+      "p95": 109958557,
+      "p99": 109958557
+    },
+    "indexed_startup_us": {
+      "unit": "microseconds",
+      "samples": [
+        827706,
+        268438,
+        266401,
+        265985,
+        267579,
+        283056,
+        279177,
+        292310,
+        276529,
+        267685,
+        267004,
+        329234,
+        265116,
+        266416,
+        266941,
+        267608,
+        266379,
+        268284,
+        267960,
+        269096
+      ],
+      "p50": 267685,
+      "p95": 329234,
+      "p99": 827706
+    },
+    "search_us": {
+      "unit": "microseconds",
+      "samples": [
+        542,
+        564,
+        600,
+        663,
+        726,
+        647,
+        511,
+        623,
+        620,
+        690,
+        512,
+        512,
+        471,
+        637,
+        560,
+        480,
+        488,
+        570,
+        553,
+        485
+      ],
+      "p50": 560,
+      "p95": 690,
+      "p99": 726
+    },
+    "open_note_us": {
+      "unit": "microseconds",
+      "samples": [
+        539,
+        556,
+        949,
+        594,
+        669,
+        571,
+        533,
+        825,
+        594,
+        637,
+        623,
+        576,
+        831,
+        573,
+        554,
+        528,
+        725,
+        793,
+        601,
+        769
+      ],
+      "p50": 594,
+      "p95": 831,
+      "p99": 949
+    },
+    "backend_process_rss_bytes": {
+      "unit": "bytes",
+      "samples": [
+        59490304,
+        60702720,
+        60555264,
+        76496896,
+        87080960,
+        97665024,
+        108249088,
+        118505472,
+        129089536,
+        129269760,
+        139853824,
+        150437888,
+        139886592,
+        150470656,
+        161054720,
+        171638784,
+        161087488,
+        171671552,
+        182255616,
+        166363136,
+        186630144,
+        195297280
+      ],
+      "p50": 139853824,
+      "p95": 186630144,
+      "p99": 195297280
+    }
+  }
+}

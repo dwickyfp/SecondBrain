@@ -16,6 +16,9 @@ pub mod parse;
 pub mod source;
 
 pub use ast::{SemanticKind, SemanticNode};
-pub use frontmatter::{MetadataPatch, NoteMetadata, ensure_note_id, parse_metadata};
+pub use frontmatter::{
+    MetadataPatch, NoteMetadata, PropertyEdit, PropertyPatch, PropertyValue, edit_property,
+    ensure_note_id, parse_metadata, read_properties,
+};
 pub use parse::{Fingerprint, SourceDocument};
 pub use source::{LineEnding, SourceSpan};

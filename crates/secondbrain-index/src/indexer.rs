@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use rusqlite::{Connection, params};
 use secondbrain_core::hash::ContentHash;
 use secondbrain_core::id::NoteId;
 use secondbrain_core::path::WorkspacePath;
 use secondbrain_markdown::extract::{PropertyValue, extract};
-use secondbrain_markdown::{SourceDocument, parse_metadata};
+use secondbrain_markdown::{NoteMetadata, SourceDocument, parse_metadata};
 use secondbrain_vault::base_snapshot::BaseSnapshotStore;
 use secondbrain_vault::{IdentityMap, RecoveryOutcome, WorkspaceRoot};
 use thiserror::Error;
@@ -27,6 +28,23 @@ pub struct IndexReport {
     pub broken_links: usize,
 }
 
+pub const INDEX_SCHEMA_VERSION: i64 = 3;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IndexHealth {
+    Missing,
+    Valid,
+    Stale,
+    Invalid,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IndexOpenReport {
+    pub health: IndexHealth,
+    pub rebuilt: bool,
+    pub report: IndexReport,
+}
+
 #[derive(Debug, Error)]
 pub enum IndexError {
     #[error("index I/O failed for {path}: {source}")]
@@ -41,6 +59,8 @@ pub enum IndexError {
     NonUtf8Path { path: PathBuf },
     #[error("portable path collision between {first} and {second}")]
     PathCollision { first: String, second: String },
+    #[error("symbolic link is not supported during workspace traversal: {path}")]
+    Symlink { path: String },
     #[error("duplicate note ID {note_id} in {first} and {second}")]
     DuplicateId {
         note_id: NoteId,
@@ -59,6 +79,7 @@ struct Note {
     path: WorkspacePath,
     source: String,
     document: SourceDocument,
+    metadata: NoteMetadata,
     id: Option<NoteId>,
 }
 
@@ -108,12 +129,15 @@ pub fn note_paths(
 
 pub fn rebuild(root: impl AsRef<Path>, config: &IndexConfig) -> Result<IndexReport, IndexError> {
     let root = root.as_ref();
+    let started = Instant::now();
     let mut skipped = 0;
     let mut files = Vec::new();
     scan(root, root, config, &mut files, &mut skipped)?;
     files.sort();
     reject_path_collisions(&files)?;
+    profile_stage("scan", started.elapsed());
 
+    let parsing_started = Instant::now();
     let mut notes = Vec::new();
     let mut ids = BTreeMap::new();
     for (relative, absolute) in files {
@@ -146,11 +170,15 @@ pub fn rebuild(root: impl AsRef<Path>, config: &IndexConfig) -> Result<IndexRepo
             })?,
             source,
             document,
+            metadata: metadata.clone(),
             id: metadata.id,
         });
     }
+    profile_stage("parse", parsing_started.elapsed());
 
+    let identity_started = Instant::now();
     establish_ids(root, &mut notes)?;
+    profile_stage("identity_and_genesis", identity_started.elapsed());
     let internal = root.join(INTERNAL_DIR);
     fs::create_dir_all(&internal).map_err(|source| IndexError::Io {
         path: internal.clone(),
@@ -162,7 +190,9 @@ pub fn rebuild(root: impl AsRef<Path>, config: &IndexConfig) -> Result<IndexRepo
 
     let mut database = crate::IndexDatabase::open(&temporary).map_err(database_error)?;
     database.migrate().map_err(database_error)?;
+    let population_started = Instant::now();
     let mut report = populate(database.connection(), &notes)?;
+    profile_stage("sqlite_population", population_started.elapsed());
     report.skipped = skipped;
     check_database(database.connection())?;
     database
@@ -170,11 +200,113 @@ pub fn rebuild(root: impl AsRef<Path>, config: &IndexConfig) -> Result<IndexRepo
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     drop(database);
     remove_sidecars(&active)?;
+    remove_one(&active)?;
     fs::rename(&temporary, &active).map_err(|source| IndexError::Io {
         path: active,
         source,
     })?;
     Ok(report)
+}
+
+fn profile_stage(stage: &str, elapsed: std::time::Duration) {
+    if std::env::var_os("SECONDBRAIN_PROFILE_INDEX").is_some() {
+        eprintln!(
+            "secondbrain_index stage={stage} elapsed_us={}",
+            elapsed.as_micros()
+        );
+    }
+}
+
+/// Reuses a complete current index, rebuilding only when it is missing, stale,
+/// corrupt, or uses a different schema. This is the shared workspace-open
+/// health contract; callers should not infer health from file existence alone.
+pub fn ensure_index(
+    root: impl AsRef<Path>,
+    config: &IndexConfig,
+) -> Result<IndexOpenReport, IndexError> {
+    let root = root.as_ref();
+    let health = index_health(root, config)?;
+    if health == IndexHealth::Valid {
+        let database = crate::IndexDatabase::open(index_path(root)).map_err(database_error)?;
+        return Ok(IndexOpenReport {
+            health,
+            rebuilt: false,
+            report: report_from_database(&database)?,
+        });
+    }
+    Ok(IndexOpenReport {
+        health,
+        rebuilt: true,
+        report: rebuild(root, config)?,
+    })
+}
+
+pub fn index_health(
+    root: impl AsRef<Path>,
+    config: &IndexConfig,
+) -> Result<IndexHealth, IndexError> {
+    let root = root.as_ref();
+    let path = index_path(root);
+    if !path.is_file() {
+        return Ok(IndexHealth::Missing);
+    }
+    let database = match crate::IndexDatabase::open(&path) {
+        Ok(database) => database,
+        Err(_) => return Ok(IndexHealth::Invalid),
+    };
+    let paths = note_paths(root, config)?;
+    let connection = database.connection();
+    let valid = (|| -> Result<bool, rusqlite::Error> {
+        let schema: i64 = connection.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )?;
+        if schema != INDEX_SCHEMA_VERSION {
+            return Ok(false);
+        }
+        check_database(connection).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let mut statement = connection.prepare(
+            "SELECT p.path,n.content_hash FROM notes n JOIN paths p ON p.note_id=n.note_id AND p.is_current=1 ORDER BY p.path",
+        )?;
+        let indexed = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if indexed.len() != paths.len() {
+            return Ok(false);
+        }
+        for ((indexed_path, indexed_hash), workspace_path) in indexed.iter().zip(paths) {
+            if indexed_path != workspace_path.as_str() {
+                return Ok(false);
+            }
+            let bytes = fs::read(root.join(workspace_path.as_path()))
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            if *indexed_hash != ContentHash::digest(&bytes).to_string() {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    })();
+    match valid {
+        Ok(true) => Ok(IndexHealth::Valid),
+        Ok(false) => Ok(IndexHealth::Stale),
+        Err(_) => Ok(IndexHealth::Invalid),
+    }
+}
+
+fn report_from_database(database: &crate::IndexDatabase) -> Result<IndexReport, IndexError> {
+    let indexed = database
+        .connection()
+        .query_row("SELECT COUNT(*) FROM notes", [], |row| row.get::<_, i64>(0))?
+        as usize;
+    Ok(IndexReport {
+        indexed,
+        broken_links: database.broken_links().map_err(database_error)?.len(),
+        orphans: database.orphans().map_err(database_error)?.len(),
+        ..IndexReport::default()
+    })
 }
 
 fn scan(
@@ -207,11 +339,17 @@ fn scan(
             .exclusions
             .iter()
             .any(|pattern| relative == *pattern || relative.starts_with(&format!("{pattern}/")));
-        if internal || excluded {
+        let file_type = entry.file_type().map_err(|source| IndexError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if file_type.is_symlink() {
+            return Err(IndexError::Symlink { path: relative });
+        } else if internal || excluded {
             *skipped += count_markdown(&path)?;
-        } else if path.is_dir() {
+        } else if file_type.is_dir() {
             scan(root, &path, config, files, skipped)?;
-        } else if is_markdown(&path) {
+        } else if file_type.is_file() && is_markdown(&path) {
             files.push((relative, path));
         }
     }
@@ -237,7 +375,16 @@ fn reject_path_collisions(files: &[(String, PathBuf)]) -> Result<(), IndexError>
 }
 
 fn count_markdown(path: &Path) -> Result<usize, IndexError> {
-    if path.is_file() {
+    let metadata = fs::symlink_metadata(path).map_err(|source| IndexError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(IndexError::Symlink {
+            path: path.display().to_string(),
+        });
+    }
+    if metadata.is_file() {
         return Ok(usize::from(is_markdown(path)));
     }
     let mut count = 0;
@@ -245,13 +392,23 @@ fn count_markdown(path: &Path) -> Result<usize, IndexError> {
         path: path.to_path_buf(),
         source,
     })? {
-        let child = entry
+        let entry = entry.map_err(|source| IndexError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if entry
+            .file_type()
             .map_err(|source| IndexError::Io {
-                path: path.to_path_buf(),
+                path: entry.path(),
                 source,
             })?
-            .path();
-        count += count_markdown(&child)?;
+            .is_symlink()
+        {
+            return Err(IndexError::Symlink {
+                path: entry.path().display().to_string(),
+            });
+        }
+        count += count_markdown(&entry.path())?;
     }
     Ok(count)
 }
@@ -288,12 +445,37 @@ fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
         message: error.to_string(),
     })?;
     let bases = BaseSnapshotStore::new(&workspace);
+    let fresh_map = map.is_empty();
     // Every note this scan found, including the ones whose identity came from
     // their own frontmatter: what the identity map needs is which recorded
     // paths still hold a file, and a note declaring its own id occupies its
     // path exactly as much as one that does not.
     let present: BTreeSet<WorkspacePath> = notes.iter().map(|note| note.path.clone()).collect();
-    for note in notes {
+    let fresh = if fresh_map {
+        let distinct = notes
+            .iter()
+            .filter(|note| note.id.is_none())
+            .map(|note| {
+                (
+                    note.path.clone(),
+                    ContentHash::digest(note.source.as_bytes()),
+                    note.document.semantic_fingerprint(),
+                )
+            })
+            .collect::<Vec<_>>();
+        Some(
+            map.register_distinct_batch(&distinct)
+                .map_err(|error| IndexError::Identity {
+                    path: root.display().to_string(),
+                    message: error.to_string(),
+                })?
+                .into_iter(),
+        )
+    } else {
+        None
+    };
+    let mut fresh = fresh;
+    for note in &mut *notes {
         let hash = ContentHash::digest(note.source.as_bytes());
         let fingerprint = note.document.semantic_fingerprint();
         let note_id = if let Some(note_id) = note.id {
@@ -308,6 +490,11 @@ fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
                     message: error.to_string(),
                 })?;
             note_id
+        } else if fresh_map {
+            fresh
+                .as_mut()
+                .and_then(Iterator::next)
+                .expect("fresh identity registered for every note without an id")
         } else {
             // Resolved against the scan rather than the file alone: a rebuild
             // is the one caller that knows which recorded paths still hold a
@@ -336,20 +523,29 @@ fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
             }
         };
         note.id = Some(note_id);
+    }
+    let genesis = notes
+        .iter()
+        .map(|note| {
+            (
+                note.id.expect("identity established"),
+                note.path.clone(),
+                note.source.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    bases
+        .ensure_genesis_batch(&genesis)
+        .map_err(|error| IndexError::ConvergedBase {
+            path: root.display().to_string(),
+            message: error.to_string(),
+        })?;
+    for note in notes {
+        let note_id = note.id.expect("identity established");
         // A full scan may have recovered a move. Keep the old converged bytes,
         // hash and version, but make their location follow the identity.
         bases
             .update_path(note_id, &note.path)
-            .map_err(|error| IndexError::ConvergedBase {
-                path: note.path.to_string(),
-                message: error.to_string(),
-            })?;
-        // Whether the identity was just assigned or recovered from an earlier
-        // run, the workspace is now responsible for this note, so it owes it a
-        // base. Doing it for both cases is what heals a workspace indexed by a
-        // build that recorded none.
-        bases
-            .ensure_genesis(note_id, &note.path, &note.source)
             .map_err(|error| IndexError::ConvergedBase {
                 path: note.path.to_string(),
                 message: error.to_string(),
@@ -359,7 +555,7 @@ fn establish_ids(root: &Path, notes: &mut [Note]) -> Result<(), IndexError> {
 }
 
 fn populate(connection: &Connection, notes: &[Note]) -> Result<IndexReport, IndexError> {
-    connection.execute_batch("BEGIN IMMEDIATE;")?;
+    begin_population(connection)?;
     let result = populate_inner(connection, notes);
     match result {
         Ok(report) => {
@@ -373,42 +569,51 @@ fn populate(connection: &Connection, notes: &[Note]) -> Result<IndexReport, Inde
     }
 }
 
+fn begin_population(connection: &Connection) -> Result<(), rusqlite::Error> {
+    connection.execute_batch("BEGIN IMMEDIATE;")
+}
+
 fn populate_inner(connection: &Connection, notes: &[Note]) -> Result<IndexReport, IndexError> {
-    let mut lookup = BTreeMap::new();
+    let mut lookup: BTreeMap<String, BTreeSet<NoteId>> = BTreeMap::new();
     for note in notes {
-        let metadata = parse_metadata(&note.source).expect("metadata validated before population");
+        let metadata = &note.metadata;
         let id = note.id.expect("identity established before population");
-        lookup.insert(note.path.as_str().to_lowercase(), id);
-        lookup.insert(
-            note.path
-                .as_str()
-                .trim_end_matches(".md")
-                .trim_end_matches(".markdown")
-                .to_lowercase(),
-            id,
-        );
+        lookup
+            .entry(note.path.as_str().to_lowercase())
+            .or_default()
+            .insert(id);
+        lookup
+            .entry(
+                note.path
+                    .as_str()
+                    .trim_end_matches(".md")
+                    .trim_end_matches(".markdown")
+                    .to_lowercase(),
+            )
+            .or_default()
+            .insert(id);
         if let Some(name) = note
             .path
             .as_path()
             .file_stem()
             .and_then(|value| value.to_str())
         {
-            lookup.insert(name.to_lowercase(), id);
+            lookup.entry(name.to_lowercase()).or_default().insert(id);
         }
         if let Some(title) = &metadata.title {
-            lookup.insert(title.to_lowercase(), id);
+            lookup.entry(title.to_lowercase()).or_default().insert(id);
         }
         for alias in aliases(&metadata.properties) {
-            lookup.insert(alias.to_lowercase(), id);
+            lookup.entry(alias.to_lowercase()).or_default().insert(id);
         }
     }
     let mut linked = BTreeSet::new();
     let mut broken = 0;
     for note in notes {
         let id = note.id.expect("identity established");
-        let metadata = parse_metadata(&note.source).expect("validated");
+        let metadata = &note.metadata;
         let extracted = extract(&note.document);
-        let title = metadata.title.or_else(|| {
+        let title = metadata.title.clone().or_else(|| {
             extracted
                 .headings
                 .first()
@@ -465,11 +670,14 @@ fn populate_inner(connection: &Connection, notes: &[Note]) -> Result<IndexReport
             )?;
         }
         for link in extracted.links {
-            let resolved = lookup.get(&link.target.to_lowercase()).copied();
+            let candidates = lookup.get(&link.target.to_lowercase());
+            let resolved = candidates.and_then(|values| {
+                (values.len() == 1).then(|| *values.first().expect("one candidate"))
+            });
             if let Some(target) = resolved {
                 linked.insert(id);
                 linked.insert(target);
-            } else {
+            } else if candidates.is_none() {
                 broken += 1;
             }
             connection.execute(
@@ -480,6 +688,15 @@ fn populate_inner(connection: &Connection, notes: &[Note]) -> Result<IndexReport
                     resolved.map(|value| value.to_string())
                 ],
             )?;
+            let link_id = connection.last_insert_rowid();
+            if let Some(candidates) = candidates.filter(|values| values.len() > 1) {
+                for candidate in candidates {
+                    connection.execute(
+                        "INSERT INTO link_candidates(link_id,note_id) VALUES (?1,?2)",
+                        params![link_id, candidate.to_string()],
+                    )?;
+                }
+            }
         }
     }
     Ok(IndexReport {
@@ -593,4 +810,21 @@ pub fn logical_dump(path: impl AsRef<Path>) -> Result<LogicalDump, IndexError> {
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(LogicalDump { notes, links })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn population_uses_one_enclosing_transaction() {
+        let connection = Connection::open_in_memory().unwrap();
+
+        begin_population(&connection).unwrap();
+
+        assert!(!connection.is_autocommit());
+        assert!(begin_population(&connection).is_err());
+        connection.execute_batch("ROLLBACK").unwrap();
+        assert!(connection.is_autocommit());
+    }
 }

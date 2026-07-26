@@ -9,10 +9,12 @@ license.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+blake3.workspace = true
 rusqlite.workspace = true
 secondbrain-core = { path = "../secondbrain-core" }
 secondbrain-markdown = { path = "../secondbrain-markdown" }
 secondbrain-vault = { path = "../secondbrain-vault" }
+serde.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
 

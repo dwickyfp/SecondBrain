@@ -2,6 +2,9 @@
 **/target/
 **/node_modules/
 **/dist/
+**/artifacts/playwright/
+**/playwright-report/
+**/test-results/
 **/src-tauri/gen/schemas/
 **/*.rs.bk
 
@@ -16,3 +19,7 @@
 *.swp
 *.swo
 *~
+
+# Local agent/tool state
+.claude/
+.superpowers/

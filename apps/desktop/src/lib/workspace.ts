@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from './transport';
 
 export interface NoteSummary {
   noteId: string;
@@ -21,6 +21,7 @@ export interface WorkspaceSummary {
 
 export interface NoteDocument extends NoteSummary {
   source: string;
+  version: number;
 }
 
 export interface OutlineHeading {

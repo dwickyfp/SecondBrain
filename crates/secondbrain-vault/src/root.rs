@@ -14,7 +14,7 @@ use secondbrain_core::path::WorkspacePath;
 use secondbrain_core::{Error, Result};
 
 use crate::atomic_write::WriteReceipt;
-use crate::atomic_write::atomic_write as do_atomic_write;
+use crate::atomic_write::{atomic_create as do_atomic_create, atomic_write as do_atomic_write};
 
 /// The canonical, write-confining root of a SecondBrain workspace.
 ///
@@ -122,6 +122,39 @@ impl WorkspaceRoot {
         Ok(resolved)
     }
 
+    /// Resolves a path for inspection without creating missing parent directories.
+    pub fn resolve_read_only(&self, path: &WorkspacePath) -> Result<PathBuf> {
+        let joined = self.canonical.join(path.as_path());
+        let parent = joined.parent().ok_or_else(|| Error::WorkspaceEscape {
+            path: joined.clone(),
+        })?;
+        let mut existing = parent;
+        while !existing.exists() {
+            existing = existing.parent().ok_or_else(|| Error::WorkspaceEscape {
+                path: joined.clone(),
+            })?;
+        }
+        let canonical_parent = fs::canonicalize(existing).map_err(|source| Error::Io {
+            operation: "canonicalize existing parent",
+            source,
+        })?;
+        if !canonical_parent.starts_with(&self.canonical) {
+            return Err(Error::WorkspaceEscape {
+                path: canonical_parent,
+            });
+        }
+        if joined.exists() {
+            let canonical = fs::canonicalize(&joined).map_err(|source| Error::Io {
+                operation: "canonicalize target",
+                source,
+            })?;
+            if !canonical.starts_with(&self.canonical) {
+                return Err(Error::WorkspaceEscape { path: canonical });
+            }
+        }
+        Ok(joined)
+    }
+
     /// Atomically writes `bytes` to the workspace-relative `path`.
     ///
     /// The write is performed to a temporary file in the same directory as the
@@ -131,5 +164,11 @@ impl WorkspaceRoot {
     pub fn atomic_write(&self, path: &WorkspacePath, bytes: &[u8]) -> Result<WriteReceipt> {
         let target = self.resolve(path)?;
         do_atomic_write(&target, bytes)
+    }
+
+    /// Atomically creates a new workspace file, failing if the target exists.
+    pub fn atomic_create(&self, path: &WorkspacePath, bytes: &[u8]) -> Result<WriteReceipt> {
+        let target = self.resolve(path)?;
+        do_atomic_create(&target, bytes)
     }
 }

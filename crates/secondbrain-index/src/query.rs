@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use rusqlite::params;
 use secondbrain_core::id::NoteId;
+use serde::Serialize;
 
 use crate::{Error, IndexDatabase, QueryValidationError, Result};
 
@@ -59,7 +60,7 @@ pub struct BrokenLink {
     pub target: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct NoteSummary {
     pub note_id: NoteId,
     pub path: String,
@@ -71,6 +72,53 @@ pub struct Heading {
     pub level: u8,
     pub text: String,
     pub line: i64,
+}
+
+pub const WORKSPACE_GRAPH_FORMAT: &str = "sb-workspace-graph-v1";
+
+/// Versioned, read-only graph derived exclusively from the workspace index.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WorkspaceGraph {
+    pub format: &'static str,
+    pub nodes: Vec<WorkspaceGraphNode>,
+    pub edges: Vec<WorkspaceGraphEdge>,
+    pub broken_links: Vec<WorkspaceGraphBrokenLink>,
+    pub ambiguous_links: Vec<WorkspaceGraphAmbiguousLink>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WorkspaceGraphNode {
+    pub note_id: NoteId,
+    pub path: String,
+    pub title: Option<String>,
+    pub incoming_occurrences: u64,
+    pub outgoing_occurrences: u64,
+    pub orphan: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WorkspaceGraphEdge {
+    pub source_note_id: NoteId,
+    pub target_note_id: NoteId,
+    pub occurrences: u64,
+    pub self_link: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WorkspaceGraphBrokenLink {
+    pub source_note_id: NoteId,
+    pub source_path: String,
+    pub target: String,
+    pub occurrences: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WorkspaceGraphAmbiguousLink {
+    pub source_note_id: NoteId,
+    pub source_path: String,
+    pub target: String,
+    pub occurrences: u64,
+    pub candidates: Vec<NoteSummary>,
 }
 
 impl IndexDatabase {
@@ -221,7 +269,9 @@ impl IndexDatabase {
         let mut statement = self.connection().prepare(
             "SELECT l.note_id,p.path,l.target FROM links l
              JOIN paths p ON p.note_id=l.note_id AND p.is_current=1
-             WHERE l.label IS NULL ORDER BY p.path,l.note_id,l.target",
+             WHERE l.label IS NULL
+               AND NOT EXISTS (SELECT 1 FROM link_candidates c WHERE c.link_id=l.id)
+             ORDER BY p.path,l.note_id,l.target",
         )?;
         let rows = statement.query_map([], |row| {
             Ok((
@@ -265,6 +315,143 @@ impl IndexDatabase {
             })
         })
         .collect()
+    }
+
+    /// Returns one deterministic graph snapshot using indexed data only.
+    pub fn workspace_graph(&self) -> Result<WorkspaceGraph> {
+        let mut node_statement = self.connection().prepare(
+            "SELECT n.note_id,p.path,n.title,
+                    (SELECT count(*) FROM links l WHERE l.label=n.note_id),
+                    (SELECT count(*) FROM links l WHERE l.note_id=n.note_id AND l.label IS NOT NULL)
+             FROM notes n JOIN paths p ON p.note_id=n.note_id AND p.is_current=1
+             ORDER BY p.path,n.note_id",
+        )?;
+        let nodes = node_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get::<_, i64>(3)? as u64,
+                    row.get::<_, i64>(4)? as u64,
+                ))
+            })?
+            .map(|row| {
+                let (id, path, title, incoming, outgoing) = row?;
+                Ok(WorkspaceGraphNode {
+                    note_id: parse_id(&id)?,
+                    path,
+                    title,
+                    incoming_occurrences: incoming,
+                    outgoing_occurrences: outgoing,
+                    orphan: incoming == 0 && outgoing == 0,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut edge_statement = self.connection().prepare(
+            "SELECT note_id,label,count(*) FROM links WHERE label IS NOT NULL
+             GROUP BY note_id,label ORDER BY note_id,label",
+        )?;
+        let edges = edge_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? as u64,
+                ))
+            })?
+            .map(|row| {
+                let (source, target, occurrences) = row?;
+                let source_note_id = parse_id(&source)?;
+                let target_note_id = parse_id(&target)?;
+                Ok(WorkspaceGraphEdge {
+                    self_link: source_note_id == target_note_id,
+                    source_note_id,
+                    target_note_id,
+                    occurrences,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut broken_statement = self.connection().prepare(
+            "SELECT l.note_id,p.path,l.target,count(*) FROM links l
+             JOIN paths p ON p.note_id=l.note_id AND p.is_current=1
+             WHERE l.label IS NULL AND NOT EXISTS (SELECT 1 FROM link_candidates c WHERE c.link_id=l.id)
+             GROUP BY l.note_id,p.path,l.target ORDER BY p.path,l.note_id,l.target",
+        )?;
+        let broken_links = broken_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get::<_, i64>(3)? as u64,
+                ))
+            })?
+            .map(|row| {
+                let (id, source_path, target, occurrences) = row?;
+                Ok(WorkspaceGraphBrokenLink {
+                    source_note_id: parse_id(&id)?,
+                    source_path,
+                    target,
+                    occurrences,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut ambiguous_statement = self.connection().prepare(
+            "SELECT l.note_id,p.path,l.target,count(DISTINCT l.id) FROM links l
+             JOIN paths p ON p.note_id=l.note_id AND p.is_current=1
+             WHERE l.label IS NULL AND EXISTS (SELECT 1 FROM link_candidates c WHERE c.link_id=l.id)
+             GROUP BY l.note_id,p.path,l.target ORDER BY p.path,l.note_id,l.target",
+        )?;
+        let ambiguous_rows = ambiguous_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)? as u64,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut candidate_statement = self.connection().prepare(
+            "SELECT DISTINCT n.note_id,p.path,n.title FROM links l
+             JOIN link_candidates c ON c.link_id=l.id JOIN notes n ON n.note_id=c.note_id
+             JOIN paths p ON p.note_id=n.note_id AND p.is_current=1
+             WHERE l.note_id=?1 AND l.target=?2 ORDER BY p.path,n.note_id",
+        )?;
+        let mut ambiguous_links = Vec::with_capacity(ambiguous_rows.len());
+        for (id, source_path, target, occurrences) in ambiguous_rows {
+            let candidates = candidate_statement
+                .query_map(params![id, target], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?))
+                })?
+                .map(|row| {
+                    let (id, path, title) = row?;
+                    Ok(NoteSummary {
+                        note_id: parse_id(&id)?,
+                        path,
+                        title,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            ambiguous_links.push(WorkspaceGraphAmbiguousLink {
+                source_note_id: parse_id(&id)?,
+                source_path,
+                target,
+                occurrences,
+                candidates,
+            });
+        }
+        Ok(WorkspaceGraph {
+            format: WORKSPACE_GRAPH_FORMAT,
+            nodes,
+            edges,
+            broken_links,
+            ambiguous_links,
+        })
     }
 }
 

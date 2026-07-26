@@ -49,6 +49,11 @@ enum Command {
         /// The workspace directory.
         workspace: PathBuf,
     },
+    /// Safely adopt an existing Obsidian-compatible vault in place.
+    Import {
+        #[command(subcommand)]
+        command: ImportCommand,
+    },
     /// Check that every note parses, round-trips, and claims a unique identity.
     Validate {
         /// The workspace directory.
@@ -66,10 +71,20 @@ enum Command {
         /// The text to search for.
         query: String,
     },
+    /// Export the versioned graph derived from the workspace index.
+    Graph {
+        /// The workspace directory.
+        workspace: PathBuf,
+    },
     /// Inspect notes.
     Note {
         #[command(subcommand)]
         command: NoteCommand,
+    },
+    /// Read, preview, and apply typed note properties.
+    Property {
+        #[command(subcommand)]
+        command: PropertyCommand,
     },
     /// Preview the transaction an incoming file implies, without writing.
     Diff {
@@ -115,6 +130,21 @@ enum IndexCommand {
 }
 
 #[derive(Subcommand)]
+enum ImportCommand {
+    /// Inventory and validate a vault without writing anything.
+    Preview {
+        workspace: PathBuf,
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Apply a reviewed preview after revalidating the whole vault.
+    Apply {
+        workspace: PathBuf,
+        preview: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
 enum NoteCommand {
     /// Report a note's identity, convergence, and links in both directions.
     Inspect {
@@ -122,6 +152,26 @@ enum NoteCommand {
         workspace: PathBuf,
         /// The workspace-relative path of the note.
         path: String,
+    },
+    /// Preview creation of a new note from a Markdown source file.
+    Create {
+        workspace: PathBuf,
+        path: String,
+        source: PathBuf,
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Apply a reviewed note-creation preview.
+    ApplyCreate {
+        workspace: PathBuf,
+        preview: PathBuf,
+    },
+    /// Open an existing daily note or preview creation for an explicit date.
+    Daily {
+        workspace: PathBuf,
+        date: String,
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
     },
 }
 
@@ -133,6 +183,34 @@ enum TransactionCommand {
         workspace: PathBuf,
         /// A plan file produced by `secondbrain diff`.
         plan: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum PropertyCommand {
+    /// Read editable properties as typed JSON values.
+    Read { workspace: PathBuf, path: String },
+    /// Preview setting a property from a JSON value.
+    Set {
+        workspace: PathBuf,
+        path: String,
+        key: String,
+        value: String,
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Preview removing a property.
+    Remove {
+        workspace: PathBuf,
+        path: String,
+        key: String,
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Apply a property preview after reviewing it.
+    Apply {
+        workspace: PathBuf,
+        preview: PathBuf,
     },
 }
 
@@ -170,14 +248,80 @@ fn main() -> ExitCode {
 fn dispatch(format: Format, command: Command) -> Result<u8, CliError> {
     match command {
         Command::Init { workspace } => commands::init::run(format, &workspace),
+        Command::Import { command } => match command {
+            ImportCommand::Preview { workspace, out } => {
+                commands::import::preview(format, &workspace, out.as_deref())
+            }
+            ImportCommand::Apply { workspace, preview } => {
+                commands::import::apply(format, &workspace, &preview)
+            }
+        },
         Command::Validate { workspace } => commands::validate::run(format, &workspace),
         Command::Index {
             command: IndexCommand::Rebuild { workspace },
         } => commands::index::rebuild(format, &workspace),
         Command::Search { workspace, query } => commands::search::run(format, &workspace, &query),
+        Command::Graph { workspace } => commands::graph::run(format, &workspace),
         Command::Note {
             command: NoteCommand::Inspect { workspace, path },
         } => commands::note::inspect(format, &workspace, &path),
+        Command::Note {
+            command:
+                NoteCommand::Create {
+                    workspace,
+                    path,
+                    source,
+                    out,
+                },
+        } => commands::create::preview(format, &workspace, &path, &source, out.as_deref()),
+        Command::Note {
+            command: NoteCommand::ApplyCreate { workspace, preview },
+        } => commands::create::apply(format, &workspace, &preview),
+        Command::Note {
+            command:
+                NoteCommand::Daily {
+                    workspace,
+                    date,
+                    out,
+                },
+        } => commands::create::daily(format, &workspace, &date, out.as_deref()),
+        Command::Property { command } => match command {
+            PropertyCommand::Read { workspace, path } => {
+                commands::property::read(format, &workspace, &path)
+            }
+            PropertyCommand::Set {
+                workspace,
+                path,
+                key,
+                value,
+                out,
+            } => {
+                let value = serde_json::from_str(&value)
+                    .map_err(|source| CliError::PlanUnreadable { source })?;
+                commands::property::preview(
+                    format,
+                    &workspace,
+                    &path,
+                    secondbrain_markdown::PropertyEdit::Set { key, value },
+                    out.as_deref(),
+                )
+            }
+            PropertyCommand::Remove {
+                workspace,
+                path,
+                key,
+                out,
+            } => commands::property::preview(
+                format,
+                &workspace,
+                &path,
+                secondbrain_markdown::PropertyEdit::Remove { key },
+                out.as_deref(),
+            ),
+            PropertyCommand::Apply { workspace, preview } => {
+                commands::property::apply(format, &workspace, &preview)
+            }
+        },
         Command::Diff {
             workspace,
             path,

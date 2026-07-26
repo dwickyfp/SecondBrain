@@ -46,7 +46,7 @@ fn migration_is_idempotent_and_records_schema_version() {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 }
 
 #[test]
@@ -90,7 +90,62 @@ fn forward_migration_upgrades_an_existing_version_one_database() {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
+}
+
+#[test]
+fn graph_migration_upgrades_version_two_without_changing_existing_links() {
+    let temp = tempdir().unwrap();
+    let mut database = IndexDatabase::open(temp.path().join("index.sqlite3")).unwrap();
+    database
+        .connection()
+        .execute_batch(include_str!("../src/migrations/0001_initial.sql"))
+        .unwrap();
+    database
+        .connection()
+        .execute_batch(include_str!("../src/migrations/0002_query_indexes.sql"))
+        .unwrap();
+    database.connection().execute_batch("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO schema_migrations(version) VALUES(1),(2);").unwrap();
+    let id = NoteId::new().to_string();
+    database
+        .connection()
+        .execute("INSERT INTO notes(note_id) VALUES(?1)", [&id])
+        .unwrap();
+    database
+        .connection()
+        .execute(
+            "INSERT INTO links(note_id,target,label) VALUES(?1,'missing',NULL)",
+            [&id],
+        )
+        .unwrap();
+
+    database.migrate().unwrap();
+
+    assert_eq!(
+        database
+            .connection()
+            .query_row("SELECT max(version) FROM schema_migrations", [], |row| row
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        database
+            .connection()
+            .query_row("SELECT count(*) FROM links", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        database
+            .connection()
+            .query_row("SELECT count(*) FROM link_candidates", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
 }
 
 #[test]
@@ -109,6 +164,7 @@ fn migration_creates_derived_schema_with_fts5_and_constraints() {
             .unwrap();
         assert!(exists, "missing table {table}");
     }
+    assert!(database.connection().query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='link_candidates')", [], |row| row.get::<_, bool>(0)).unwrap());
     let fts_sql: String = database
         .connection()
         .query_row(

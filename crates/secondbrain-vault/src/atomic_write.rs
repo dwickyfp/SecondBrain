@@ -98,3 +98,35 @@ pub fn atomic_write(target: &Path, bytes: &[u8]) -> Result<WriteReceipt> {
         bytes_written: bytes.len(),
     })
 }
+
+/// Atomically creates `target` without replacing an existing filesystem entry.
+pub fn atomic_create(target: &Path, bytes: &[u8]) -> Result<WriteReceipt> {
+    let parent = target.parent().ok_or_else(|| Error::CorruptRecord {
+        record: target.to_string_lossy().into_owned(),
+        summary: "create target has no parent directory".into(),
+    })?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|source| Error::Io {
+        operation: "create temp file",
+        source,
+    })?;
+    temp.write_all(bytes).map_err(|source| Error::Io {
+        operation: "write temp file",
+        source,
+    })?;
+    temp.as_file().sync_all().map_err(|source| Error::Io {
+        operation: "fsync temp file",
+        source,
+    })?;
+    temp.persist_noclobber(target).map_err(|error| Error::Io {
+        operation: "atomically create file",
+        source: error.error,
+    })?;
+    #[cfg(unix)]
+    if let Ok(directory) = File::open(parent) {
+        let _ = directory.sync_all();
+    }
+    Ok(WriteReceipt {
+        path: target.to_path_buf(),
+        bytes_written: bytes.len(),
+    })
+}

@@ -20,6 +20,7 @@ use std::str::FromStr;
 
 use secondbrain_core::id::NoteId;
 use secondbrain_core::{Error, Result};
+use serde::{Deserialize, Serialize};
 use serde_yaml::Mapping;
 
 /// Parsed note metadata extracted from YAML frontmatter.
@@ -48,6 +49,34 @@ pub struct MetadataPatch {
     pub source: String,
     /// The note ID that is or was set in the frontmatter.
     pub note_id: NoteId,
+}
+
+/// A frontmatter value that can be exchanged losslessly through JSON APIs.
+pub type PropertyValue = serde_json::Value;
+
+/// One typed top-level property change. `id` is reserved and cannot be changed.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum PropertyEdit {
+    Set { key: String, value: PropertyValue },
+    Remove { key: String },
+}
+
+impl PropertyEdit {
+    /// The top-level key affected by this edit.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Set { key, .. } | Self::Remove { key } => key,
+        }
+    }
+}
+
+/// Result of a surgical property edit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PropertyPatch {
+    pub changed: bool,
+    pub source: String,
 }
 
 /// The UTF-8 BOM as a byte sequence.
@@ -91,6 +120,210 @@ pub fn parse_metadata(source: &str) -> Result<NoteMetadata> {
         title,
         properties,
     })
+}
+
+/// Read JSON-compatible top-level properties, excluding the reserved note ID.
+pub fn read_properties(source: &str) -> Result<std::collections::BTreeMap<String, PropertyValue>> {
+    let metadata = parse_metadata(source)?;
+    metadata
+        .properties
+        .into_iter()
+        .filter(|(key, _)| key.as_str() != Some("id"))
+        .map(|(key, value)| {
+            let key = key
+                .as_str()
+                .ok_or_else(|| invalid_frontmatter("property keys must be strings"))?;
+            let value = serde_json::to_value(value).map_err(|error| {
+                invalid_frontmatter(&format!("property is not JSON-compatible: {error}"))
+            })?;
+            Ok((key.to_owned(), value))
+        })
+        .collect()
+}
+
+/// Surgically set or remove one safe top-level property.
+///
+/// Existing frontmatter must be a valid mapping whose top-level layout can be
+/// located without interpreting YAML presentation details. Unsupported layouts
+/// fail closed rather than risking a nested or unrelated edit.
+pub fn edit_property(source: &str, edit: &PropertyEdit) -> Result<PropertyPatch> {
+    validate_property_key(edit.key())?;
+    let current = read_properties(source)?;
+    if matches!(edit, PropertyEdit::Remove { .. }) && !current.contains_key(edit.key()) {
+        return Ok(PropertyPatch {
+            changed: false,
+            source: source.to_owned(),
+        });
+    }
+    if let PropertyEdit::Set { key, value } = edit
+        && current.get(key) == Some(value)
+    {
+        return Ok(PropertyPatch {
+            changed: false,
+            source: source.to_owned(),
+        });
+    }
+
+    let line_ending = detect_line_ending(source);
+    let rendered = match edit {
+        PropertyEdit::Set { key, value } => Some(render_property(key, value, line_ending)?),
+        PropertyEdit::Remove { .. } => None,
+    };
+    let extract = extract_frontmatter(source);
+    match extract {
+        FrontmatterExtract::Present {
+            yaml_content_start,
+            yaml_content_end,
+        }
+        | FrontmatterExtract::BomPresent {
+            yaml_content_start,
+            yaml_content_end,
+        } => {
+            let yaml = &source[yaml_content_start..yaml_content_end];
+            let spans = top_level_spans(yaml)?;
+            let target = spans.iter().find(|span| span.key == edit.key());
+            let (start, end) = target.map_or((yaml_content_end, yaml_content_end), |span| {
+                (
+                    yaml_content_start + span.start,
+                    yaml_content_start + span.end,
+                )
+            });
+            let replacement = rendered.unwrap_or_default();
+            let mut patched = String::with_capacity(source.len() + replacement.len());
+            patched.push_str(&source[..start]);
+            patched.push_str(&replacement);
+            patched.push_str(&source[end..]);
+            Ok(PropertyPatch {
+                changed: true,
+                source: patched,
+            })
+        }
+        FrontmatterExtract::Absent => {
+            let after_bom = source.strip_prefix('\u{feff}').unwrap_or(source);
+            if after_bom.starts_with("---\n") || after_bom.starts_with("---\r") {
+                return Err(invalid_frontmatter(
+                    "frontmatter has no closing --- delimiter",
+                ));
+            }
+            let Some(rendered) = rendered else {
+                return Ok(PropertyPatch {
+                    changed: false,
+                    source: source.to_owned(),
+                });
+            };
+            let bom_len = source.len() - after_bom.len();
+            let block = format!("---{line_ending}{rendered}---{line_ending}{line_ending}");
+            let mut patched = String::with_capacity(source.len() + block.len());
+            patched.push_str(&source[..bom_len]);
+            patched.push_str(&block);
+            patched.push_str(after_bom);
+            Ok(PropertyPatch {
+                changed: true,
+                source: patched,
+            })
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PropertySpan {
+    key: String,
+    start: usize,
+    end: usize,
+}
+
+fn top_level_spans(yaml: &str) -> Result<Vec<PropertySpan>> {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    for line in yaml.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\n', '\r']);
+        if !content.is_empty() && !content.starts_with([' ', '\t', '#']) {
+            let Some((key, _)) = content.split_once(':') else {
+                return Err(invalid_frontmatter("unsafe top-level frontmatter layout"));
+            };
+            validate_layout_key(key)?;
+            if starts
+                .iter()
+                .any(|(_, existing): &(usize, String)| existing == key)
+            {
+                return Err(invalid_frontmatter("duplicate top-level property key"));
+            }
+            starts.push((offset, key.to_owned()));
+        }
+        offset += line.len();
+    }
+    Ok(starts
+        .iter()
+        .enumerate()
+        .map(|(index, (start, key))| PropertySpan {
+            key: key.clone(),
+            start: *start,
+            end: property_span_end(
+                yaml,
+                *start,
+                starts
+                    .get(index + 1)
+                    .map_or(yaml.len(), |(start, _)| *start),
+            ),
+        })
+        .collect())
+}
+
+fn property_span_end(yaml: &str, start: usize, candidate_end: usize) -> usize {
+    let region = &yaml[start..candidate_end];
+    let mut offset = 0;
+    let mut trailing_comment = None;
+    for line in region.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\n', '\r']);
+        if content.starts_with('#') || content.is_empty() {
+            trailing_comment.get_or_insert(start + offset);
+        } else {
+            trailing_comment = None;
+        }
+        offset += line.len();
+    }
+    trailing_comment.unwrap_or(candidate_end)
+}
+
+fn validate_property_key(key: &str) -> Result<()> {
+    if key == "id" {
+        return Err(invalid_frontmatter("id is reserved and immutable"));
+    }
+    validate_layout_key(key)
+}
+
+fn validate_layout_key(key: &str) -> Result<()> {
+    let mut chars = key.chars();
+    if !matches!(chars.next(), Some('A'..='Z' | 'a'..='z' | '_'))
+        || !chars
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return Err(invalid_frontmatter(
+            "property key is not a safe plain YAML key",
+        ));
+    }
+    Ok(())
+}
+
+fn render_property(key: &str, value: &PropertyValue, line_ending: &str) -> Result<String> {
+    let mut mapping = serde_yaml::Mapping::new();
+    let yaml_value = serde_yaml::to_value(value).map_err(|error| {
+        invalid_frontmatter(&format!("property cannot be encoded as YAML: {error}"))
+    })?;
+    mapping.insert(serde_yaml::Value::String(key.to_owned()), yaml_value);
+    let rendered = serde_yaml::to_string(&mapping)
+        .map_err(|error| {
+            invalid_frontmatter(&format!("property cannot be encoded as YAML: {error}"))
+        })?
+        .replace('\n', line_ending);
+    Ok(rendered)
+}
+
+fn invalid_frontmatter(summary: &str) -> Error {
+    Error::InvalidMarkdown {
+        path: std::path::PathBuf::new(),
+        summary: summary.to_owned(),
+    }
 }
 
 /// Ensure that a Markdown source has a `NoteId` in its frontmatter.

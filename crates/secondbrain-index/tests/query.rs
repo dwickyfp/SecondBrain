@@ -334,3 +334,96 @@ fn corrupt_stored_note_id_has_contextual_error() {
     let error = database.search(&SearchQuery::new("needle")).unwrap_err();
     assert!(matches!(error, Error::InvalidStoredNoteId { value } if value == "bad-id"));
 }
+
+#[test]
+fn graph_is_deterministic_aggregated_and_reports_every_resolution_state() {
+    let dir = tempdir().unwrap();
+    let database = build(
+        dir.path(),
+        &[
+            (
+                "z/source.md",
+                &note(
+                    ALPHA_ID,
+                    "Source",
+                    "[[Target]] [[Target]] [[Source]] [[Missing]] [[Shared]] [[Shared]]",
+                ),
+            ),
+            ("a/target.md", &note(BETA_ID, "Target", "Connected.")),
+            (
+                "b/shared.md",
+                &format!("---\nid: {GAMMA_ID}\ntitle: One\naliases: [Shared]\n---\nOne.\n"),
+            ),
+            (
+                "c/shared.md",
+                "---\nid: 01ARZ3NDEKTSV4RRFFQ69G5FAY\ntitle: Two\naliases: [Shared]\n---\nTwo.\n",
+            ),
+            (
+                "orphan.md",
+                "---\nid: 01ARZ3NDEKTSV4RRFFQ69G5FAZ\ntitle: Orphan\n---\nAlone.\n",
+            ),
+        ],
+    );
+
+    let first = database.workspace_graph().unwrap();
+    let second = database.workspace_graph().unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(first.format, "sb-workspace-graph-v1");
+    assert_eq!(
+        first
+            .nodes
+            .iter()
+            .map(|node| node.path.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "a/target.md",
+            "b/shared.md",
+            "c/shared.md",
+            "orphan.md",
+            "z/source.md"
+        ]
+    );
+    assert_eq!(first.edges.len(), 2);
+    assert_eq!(
+        first
+            .edges
+            .iter()
+            .map(|edge| (edge.occurrences, edge.self_link))
+            .collect::<Vec<_>>(),
+        [(1, true), (2, false)]
+    );
+    assert_eq!(first.broken_links[0].target, "Missing");
+    assert_eq!(first.broken_links[0].occurrences, 1);
+    assert_eq!(first.ambiguous_links[0].target, "Shared");
+    assert_eq!(first.ambiguous_links[0].occurrences, 2);
+    assert_eq!(
+        first.ambiguous_links[0]
+            .candidates
+            .iter()
+            .map(|note| note.path.as_str())
+            .collect::<Vec<_>>(),
+        ["b/shared.md", "c/shared.md"]
+    );
+    assert!(
+        first
+            .nodes
+            .iter()
+            .find(|node| node.path == "orphan.md")
+            .unwrap()
+            .orphan
+    );
+    assert_eq!(
+        database.broken_links().unwrap().len(),
+        1,
+        "ambiguity is not mislabeled as broken"
+    );
+    assert!(
+        database
+            .outgoing_links(ALPHA_ID.parse().unwrap())
+            .unwrap()
+            .iter()
+            .filter(|link| link.target == "Shared")
+            .all(|link| link.note_id.is_none())
+    );
+}

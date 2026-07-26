@@ -5,6 +5,7 @@ use thiserror::Error;
 
 const INITIAL_MIGRATION: &str = include_str!("migrations/0001_initial.sql");
 const QUERY_INDEXES_MIGRATION: &str = include_str!("migrations/0002_query_indexes.sql");
+const LINK_CANDIDATES_MIGRATION: &str = include_str!("migrations/0003_link_candidates.sql");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub enum QueryValidationError {
@@ -68,6 +69,15 @@ impl IndexDatabase {
         if !applied {
             transaction.execute_batch(QUERY_INDEXES_MIGRATION)?;
             transaction.execute("INSERT INTO schema_migrations (version) VALUES (2)", [])?;
+        }
+        let applied = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = 3)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !applied {
+            transaction.execute_batch(LINK_CANDIDATES_MIGRATION)?;
+            transaction.execute("INSERT INTO schema_migrations (version) VALUES (3)", [])?;
         }
         transaction.commit()?;
         Ok(())

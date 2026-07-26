@@ -140,6 +140,12 @@ pub struct IdentityMap {
 }
 
 impl IdentityMap {
+    /// Whether this workspace has no persisted identity records.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+
     /// Opens the identity map for the given workspace root.
     ///
     /// Loads all existing records from `.secondbrain/identity-map/`. Corrupt
@@ -236,6 +242,72 @@ impl IdentityMap {
         self.records.push(record);
 
         Ok(id)
+    }
+
+    /// Registers a distinct note after a complete scan established that the
+    /// workspace had no prior identity records.
+    ///
+    /// In that case there is no identity evidence to recover and every path in
+    /// the scan needs its own new ID. Avoiding a growing-map search here keeps
+    /// first population linear without changing rename or ambiguity policy for
+    /// any workspace that already has identity history.
+    pub fn register_distinct(
+        &mut self,
+        path: &WorkspacePath,
+        hash: ContentHash,
+        fingerprint: secondbrain_markdown::Fingerprint,
+    ) -> Result<NoteId> {
+        let id = NoteId::new();
+        let record = IdentityRecord {
+            version: RECORD_FORMAT_VERSION,
+            note_id: id,
+            current_path: path.clone(),
+            historical_paths: vec![path.clone()],
+            source_hash: hash,
+            fingerprint: FingerprintRecord {
+                lo: fingerprint.lo,
+                hi: fingerprint.hi,
+            },
+            last_observed: now_rfc3339_utc(),
+        };
+        self.save_record(&record)?;
+        self.records.push(record);
+        Ok(id)
+    }
+
+    /// Registers independent notes from a complete scan of an empty map.
+    ///
+    /// Each record still uses the normal atomic, fully durable write. The only
+    /// difference is that unrelated records can wait for filesystem durability
+    /// concurrently instead of serializing two sync barriers per note.
+    pub fn register_distinct_batch(
+        &mut self,
+        notes: &[(
+            WorkspacePath,
+            ContentHash,
+            secondbrain_markdown::Fingerprint,
+        )],
+    ) -> Result<Vec<NoteId>> {
+        let records = notes
+            .iter()
+            .map(|(path, hash, fingerprint)| IdentityRecord {
+                version: RECORD_FORMAT_VERSION,
+                note_id: NoteId::new(),
+                current_path: path.clone(),
+                historical_paths: vec![path.clone()],
+                source_hash: *hash,
+                fingerprint: FingerprintRecord {
+                    lo: fingerprint.lo,
+                    hi: fingerprint.hi,
+                },
+                last_observed: now_rfc3339_utc(),
+            })
+            .collect::<Vec<_>>();
+        let directory = identity_map_dir(self.root.canonical_path());
+        write_records_parallel(&directory, &records)?;
+        let ids = records.iter().map(|record| record.note_id).collect();
+        self.records.extend(records);
+        Ok(ids)
     }
 
     /// Registers the identity a note declares in its own frontmatter.
@@ -543,6 +615,10 @@ impl IdentityMap {
                 summary: "identity record not found for path update".into(),
             })?;
 
+        if self.records[slot].current_path == *new_path {
+            return Ok(());
+        }
+
         let mut record = current_record(&identity_map_dir(self.root.canonical_path()), id)
             .unwrap_or_else(|| self.records[slot].clone());
 
@@ -659,6 +735,35 @@ fn write_record(directory: &Path, record: &IdentityRecord) -> Result<()> {
 
     crate::atomic_write::atomic_write(&record_path(directory, &record.note_id), json.as_bytes())?;
     Ok(())
+}
+
+fn write_records_parallel(directory: &Path, records: &[IdentityRecord]) -> Result<()> {
+    if records.is_empty() {
+        return Ok(());
+    }
+    let workers = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(records.len());
+    let chunk_size = records.len().div_ceil(workers);
+    std::thread::scope(|scope| {
+        let handles = records
+            .chunks(chunk_size)
+            .map(|chunk| {
+                scope.spawn(|| {
+                    chunk
+                        .iter()
+                        .try_for_each(|record| write_record(directory, record))
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.join().map_err(|_| Error::CorruptRecord {
+                record: directory.display().to_string(),
+                summary: "identity record writer panicked".into(),
+            })??;
+        }
+        Ok(())
+    })
 }
 
 /// Loads a single identity record from a JSON file path.

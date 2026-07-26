@@ -1,0 +1,37 @@
+{
+  "schema": "secondbrain-desktop-performance-budgets-v1",
+  "releaseBudgets": [
+    {
+      "referenceMachine": "apple-m3-8cpu-16gb-macos-26.5",
+      "fixtureNotes": 10000,
+      "build": "cargo release backend operations; packaged native RSS must be measured separately before Task 50 release",
+      "maximum": {
+        "indexedStartupP95Ms": 3000,
+        "searchP95Ms": 100,
+        "openNoteP95Ms": 50,
+        "packagedIdleRssMiB": 250
+      }
+    },
+    {
+      "referenceMachine": "apple-m3-8cpu-16gb-macos-26.5-small-vault",
+      "fixtureNotes": 100,
+      "build": "cargo release backend operations; packaged native RSS must be measured separately before Task 50 release",
+      "maximum": {
+        "indexedStartupP95Ms": 1000,
+        "searchP95Ms": 100,
+        "openNoteP95Ms": 50,
+        "packagedIdleRssMiB": 250
+      }
+    }
+  ],
+  "firstImportOptimization": {
+    "metric": "firstIndexP95Ms",
+    "releaseThreshold": null,
+    "reason": "first import/index is measured separately from indexed cold start; observations are informational until an honest optimization target is adopted"
+  },
+  "hostedCi": {
+    "mode": "smoke-and-artifact-only",
+    "reason": "GitHub-hosted runner hardware is variable and is not a named release reference machine; no absolute latency or RSS budget is enforced there",
+    "regressionEnvelope": null
+  }
+}

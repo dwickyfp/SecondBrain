@@ -89,6 +89,11 @@ pub enum TransactionPreviewError {
         expected: &'static str,
         found: String,
     },
+    #[error("property preview declares format {found}, not {expected}")]
+    UnsupportedPropertyFormat {
+        expected: &'static str,
+        found: String,
+    },
     #[error("preview belongs to workspace {preview}, but this workspace is {workspace}")]
     WorkspaceMismatch {
         preview: WorkspaceId,

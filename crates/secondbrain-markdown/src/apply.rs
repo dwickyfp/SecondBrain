@@ -383,105 +383,34 @@ fn apply_move(
 
 /// Apply a SetProperty operation: set or update a frontmatter property.
 fn apply_set_property(source: &str, key: &str, value: &str) -> Result<String> {
-    // Check if the source has frontmatter.
-    if !source.starts_with("---\n") && !source.starts_with("---\r\n") {
-        // No frontmatter — prepend one with the property.
-        let fm = format!("---\n{key}: {value}\n---\n\n");
-        return Ok(format!("{fm}{source}"));
-    }
-
-    // Find the closing "---" delimiter.
-    let lines: Vec<&str> = source.lines().collect();
-    let mut close_line = None;
-    for (i, line) in lines.iter().enumerate().skip(1) {
-        if *line == "---" {
-            close_line = Some(i);
-            break;
-        }
-    }
-
-    let close_idx = close_line.ok_or_else(|| Error::InvalidMarkdown {
+    let yaml: serde_yaml::Value =
+        serde_yaml::from_str(value).map_err(|error| Error::InvalidMarkdown {
+            path: PathBuf::new(),
+            summary: format!("property value is not valid YAML: {error}"),
+        })?;
+    let value = serde_json::to_value(yaml).map_err(|error| Error::InvalidMarkdown {
         path: PathBuf::new(),
-        summary: "frontmatter has no closing --- delimiter".to_string(),
+        summary: format!("property value is not JSON-compatible: {error}"),
     })?;
-
-    // Check if the key already exists.
-    let mut new_lines = Vec::new();
-    let mut found_key = false;
-
-    for (i, line) in lines.iter().enumerate() {
-        if i == 0 {
-            // Opening ---
-            new_lines.push(line.to_string());
-            continue;
-        }
-        if i == close_idx {
-            // Closing --- — if we didn't find the key, insert before this.
-            if !found_key {
-                new_lines.push(format!("{key}: {value}"));
-            }
-            new_lines.push(line.to_string());
-            continue;
-        }
-        // Check if this line is the key we're setting.
-        let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix(&format!("{key}:")) {
-            // This is the key line — replace it.
-            new_lines.push(format!("{key}: {value}"));
-            found_key = true;
-            // Ensure we don't have leading whitespace issues.
-            let _ = rest; // suppress unused warning
-        } else {
-            new_lines.push(line.to_string());
-        }
-    }
-
-    // Reconstruct with original line endings.
-    let line_ending = if source.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
-    let result = new_lines.join(line_ending);
-
-    // Ensure trailing newline.
-    if source.ends_with('\n') && !result.ends_with('\n') {
-        Ok(format!("{result}\n"))
-    } else {
-        Ok(result)
-    }
+    crate::frontmatter::edit_property(
+        source,
+        &crate::frontmatter::PropertyEdit::Set {
+            key: key.to_owned(),
+            value,
+        },
+    )
+    .map(|patch| patch.source)
 }
 
 /// Apply a RemoveProperty operation: remove a frontmatter property.
 fn apply_remove_property(source: &str, key: &str) -> Result<String> {
-    if !source.starts_with("---\n") && !source.starts_with("---\r\n") {
-        return Ok(source.to_string());
-    }
-
-    let lines: Vec<&str> = source.lines().collect();
-    let mut new_lines = Vec::new();
-
-    for line in &lines {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with(&format!("{key}:")) {
-            // Skip this line (remove the property).
-            continue;
-        }
-        new_lines.push(line.to_string());
-    }
-
-    let line_ending = if source.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
-    let result = new_lines.join(line_ending);
-
-    if source.ends_with('\n') && !result.ends_with('\n') {
-        Ok(format!("{result}\n"))
-    } else {
-        Ok(result)
-    }
+    crate::frontmatter::edit_property(
+        source,
+        &crate::frontmatter::PropertyEdit::Remove {
+            key: key.to_owned(),
+        },
+    )
+    .map(|patch| patch.source)
 }
 
 // ---------------------------------------------------------------------------

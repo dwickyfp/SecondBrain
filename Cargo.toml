@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/secondbrain-cli", "crates/secondbrain-core", "crates/secondbrain-crdt", "crates/secondbrain-index", "crates/secondbrain-transaction", "crates/secondbrain-vault", "crates/secondbrain-markdown", "spikes/crdt-comparison/contract", "spikes/crdt-comparison/loro-candidate", "spikes/crdt-comparison/benches"]
+members = ["crates/secondbrain-cli", "crates/secondbrain-core", "crates/secondbrain-crdt", "crates/secondbrain-diagnostics", "crates/secondbrain-index", "crates/secondbrain-transaction", "crates/secondbrain-vault", "crates/secondbrain-markdown", "spikes/crdt-comparison/contract", "spikes/crdt-comparison/loro-candidate", "spikes/crdt-comparison/benches"]
 exclude = ["apps/desktop/src-tauri", "spikes/crdt-comparison/yrs-candidate"]
 resolver = "3"
 

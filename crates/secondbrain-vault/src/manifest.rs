@@ -192,13 +192,16 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> Result<()> {
 /// directory already exists.
 fn ensure_internal_layout(root: &Path) -> Result<()> {
     let internal = internal_dir(root);
+    reject_symlink(&internal)?;
     fs::create_dir_all(&internal).map_err(|source| Error::Io {
         operation: "create .secondbrain",
         source,
     })?;
 
     for sub in REQUIRED_DIRECTORIES {
-        fs::create_dir_all(internal.join(sub)).map_err(|source| Error::Io {
+        let path = internal.join(sub);
+        reject_symlink(&path)?;
+        fs::create_dir_all(path).map_err(|source| Error::Io {
             operation: "create internal subdir",
             source,
         })?;
@@ -207,10 +210,25 @@ fn ensure_internal_layout(root: &Path) -> Result<()> {
     // plugins.lock is a crash-marker: its presence means the internal layout
     // is fully provisioned. Create it empty if absent, never overwrite it.
     let lock = plugins_lock_path(root);
+    reject_symlink(&lock)?;
     if !lock.exists() {
         atomic_write(&lock, b"")?;
     }
     Ok(())
+}
+
+fn reject_symlink(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(Error::WorkspaceEscape {
+            path: path.to_path_buf(),
+        }),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(Error::Io {
+            operation: "inspect internal workspace path",
+            source,
+        }),
+    }
 }
 
 /// Initializes a SecondBrain workspace at `root`.
@@ -225,6 +243,7 @@ pub fn initialize_workspace(root: &Path) -> Result<WorkspaceManifest> {
     ensure_internal_layout(root)?;
 
     let path = manifest_path(root);
+    reject_symlink(&path)?;
     if path.exists() {
         return load_manifest(root);
     }

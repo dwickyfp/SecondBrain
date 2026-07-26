@@ -33,6 +33,17 @@ pub struct TransactionRequest {
     pub operations: Vec<SemanticOperation>,
 }
 
+/// Inputs required to durably create one note.
+#[derive(Debug, Clone)]
+pub struct CreateTransactionRequest {
+    pub id: TransactionId,
+    pub actor: ActorId,
+    pub device: DeviceId,
+    pub note_id: NoteId,
+    pub path: WorkspacePath,
+    pub source: String,
+}
+
 /// Result of a successful transaction attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitOutcome {
@@ -71,6 +82,8 @@ pub enum TransactionError {
     State(#[from] StateTransitionError),
     #[error("transaction state serialization failed: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("note creation target already exists: {0}")]
+    TargetExists(WorkspacePath),
 }
 
 /// Commits transactions within one workspace.
@@ -127,17 +140,17 @@ impl TransactionEngine {
         let materialized_hash = ContentHash::digest(materialized.as_bytes());
 
         let mut state = TransactionState::Prepared;
-        self.persist_state(&request, state, version, materialized_hash, false)?;
+        self.persist_state(&request, state, version, materialized_hash, false, false)?;
 
         failpoint::hit("before_append")?;
         self.journal_operations(&request)?;
         failpoint::hit("after_append_before_state")?;
 
         state.transition_to(TransactionState::OperationsDurable)?;
-        self.persist_state(&request, state, version, materialized_hash, false)?;
+        self.persist_state(&request, state, version, materialized_hash, false, false)?;
         failpoint::hit("after_operations_durable")?;
         state.transition_to(TransactionState::Materializing)?;
-        self.persist_state(&request, state, version, materialized_hash, false)?;
+        self.persist_state(&request, state, version, materialized_hash, false, false)?;
         failpoint::hit("during_temp_markdown_write")?;
         self.workspace
             .atomic_write(&request.path, materialized.as_bytes())?;
@@ -156,9 +169,119 @@ impl TransactionEngine {
         // [`Self::record_index_refreshed`] — so setting the flag here would
         // claim work that has not happened, and recovery skips committed
         // markers that claim it, which is exactly how the repair would be lost.
-        self.persist_state(&request, state, version, materialized_hash, false)?;
+        self.persist_state(&request, state, version, materialized_hash, false, false)?;
         failpoint::hit("after_commit_before_index")?;
 
+        Ok(CommitOutcome {
+            changed: true,
+            version,
+        })
+    }
+
+    /// Journals and atomically creates a note whose target was absent at preview time.
+    pub fn create(
+        &self,
+        request: CreateTransactionRequest,
+    ) -> Result<CommitOutcome, TransactionError> {
+        let target = self.workspace.resolve_read_only(&request.path)?;
+        let materialized_hash = ContentHash::digest(request.source.as_bytes());
+        let marker_path = paths::marker_path(self.workspace.canonical_path(), request.id);
+        if marker_path.exists() && !target.exists() {
+            let marker: DurableState = serde_json::from_slice(&fs::read(&marker_path)?)?;
+            if marker.creates_note
+                && marker.transaction_id == request.id
+                && marker.note_id == request.note_id
+                && marker.path == request.path
+                && marker.materialized_hash == materialized_hash
+                && marker.state != "ABORTED"
+            {
+                self.recover()?;
+                if target.exists() && ContentHash::digest(&fs::read(&target)?) == materialized_hash
+                {
+                    return Ok(CommitOutcome {
+                        changed: false,
+                        version: NoteVersion::new(0),
+                    });
+                }
+            }
+        }
+        if target.exists() {
+            if marker_path.exists() {
+                let marker: DurableState = serde_json::from_slice(&fs::read(&marker_path)?)?;
+                let actual = ContentHash::digest(&fs::read(&target)?);
+                if marker.creates_note
+                    && marker.transaction_id == request.id
+                    && marker.note_id == request.note_id
+                    && marker.path == request.path
+                    && marker.materialized_hash == materialized_hash
+                    && actual == materialized_hash
+                {
+                    if marker.state != "COMMITTED" {
+                        self.recover()?;
+                    }
+                    return Ok(CommitOutcome {
+                        changed: false,
+                        version: NoteVersion::new(0),
+                    });
+                }
+            }
+            return Err(TransactionError::TargetExists(request.path));
+        }
+        let semantic = SemanticOperation::InsertNode {
+            anchor: None,
+            content: request.source.clone(),
+        };
+        let journal_request = TransactionRequest {
+            id: request.id,
+            actor: request.actor,
+            device: request.device,
+            note_id: request.note_id,
+            path: request.path,
+            expected_hash: ContentHash::digest(b""),
+            expected_version: NoteVersion::new(0),
+            operations: vec![semantic],
+        };
+        let version = NoteVersion::new(0);
+        self.persist_state(
+            &journal_request,
+            TransactionState::Prepared,
+            version,
+            materialized_hash,
+            false,
+            true,
+        )?;
+        failpoint::hit("create_before_append")?;
+        self.journal_operations(&journal_request)?;
+        self.persist_state(
+            &journal_request,
+            TransactionState::OperationsDurable,
+            version,
+            materialized_hash,
+            false,
+            true,
+        )?;
+        failpoint::hit("create_after_operations_durable")?;
+        self.persist_state(
+            &journal_request,
+            TransactionState::Materializing,
+            version,
+            materialized_hash,
+            false,
+            true,
+        )?;
+        self.workspace
+            .atomic_create(&journal_request.path, request.source.as_bytes())?;
+        failpoint::hit("create_after_rename_before_commit")?;
+        self.record_converged_base(&journal_request, version, &request.source)?;
+        self.persist_state(
+            &journal_request,
+            TransactionState::Committed,
+            version,
+            materialized_hash,
+            false,
+            true,
+        )?;
+        failpoint::hit("create_after_commit_before_index")?;
         Ok(CommitOutcome {
             changed: true,
             version,
@@ -246,6 +369,7 @@ impl TransactionEngine {
             version,
             actual_hash,
             false,
+            false,
         )?;
 
         Ok(CommitOutcome {
@@ -310,6 +434,7 @@ impl TransactionEngine {
         version: NoteVersion,
         materialized_hash: ContentHash,
         index_repaired: bool,
+        creates_note: bool,
     ) -> Result<(), TransactionError> {
         let marker = DurableState {
             transaction_id: request.id,
@@ -321,6 +446,7 @@ impl TransactionEngine {
             expected_version: request.expected_version,
             committed_version: version,
             index_repaired,
+            creates_note,
         };
         let root = self.workspace.canonical_path();
         fs::create_dir_all(paths::transactions_dir(root))?;
