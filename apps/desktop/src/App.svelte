@@ -1,4 +1,10 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+  import {
+    createCommandRegistry,
+    shouldSuppressShortcut,
+    type CommandPlatform
+  } from './lib/commands';
   import { noteLabel, workspaceName } from './lib/presentation';
   import {
     activeNote,
@@ -15,7 +21,9 @@
   import {
     openWorkspace,
     readNote,
+    readNoteContext,
     searchWorkspace,
+    type NoteContext,
     type NoteDocument,
     type NoteSummary,
     type SearchHit,
@@ -28,15 +36,41 @@
   let results = $state<SearchHit[]>([]);
   let navigation = $state<NavigationState>(createNavigation());
   let documents = $state<Record<string, NoteDocument>>({});
+  let contexts = $state<Record<string, NoteContext>>({});
   let paneErrors = $state<Record<PaneId, string>>({ primary: '', secondary: '' });
   let paneBusy = $state<Record<PaneId, boolean>>({ primary: false, secondary: false });
   let requests: Record<PaneId, number> = { primary: 0, secondary: 0 };
   let busy = $state(false);
   let error = $state('');
+  let paletteOpen = $state(false);
+  let paletteQuery = $state('');
+  let paletteIndex = $state(0);
+  let paletteInput = $state<HTMLInputElement | null>(null);
+  let searchInput = $state<HTMLInputElement | null>(null);
+  let returnFocus = $state<HTMLElement | null>(null);
+
+  type CommandId = 'palette' | 'search' | 'split' | 'close-split' | 'back' | 'forward' | 'close-tab';
+  const platform: CommandPlatform = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+    ? 'macos'
+    : typeof navigator !== 'undefined' && /Win/.test(navigator.platform)
+      ? 'windows'
+      : 'linux';
+  const commandRegistry = createCommandRegistry<CommandId, { workspace: boolean; split: boolean; note: boolean }>([
+    { id: 'palette', label: 'Open command palette', shortcut: 'Mod+K' },
+    { id: 'search', label: 'Focus workspace search', shortcut: 'Mod+P', enabled: (context) => context.workspace },
+    { id: 'split', label: 'Split active pane', shortcut: 'Mod+\\', enabled: (context) => context.workspace && !context.split },
+    { id: 'close-split', label: 'Close split pane', enabled: (context) => context.split },
+    { id: 'back', label: 'Navigate back', shortcut: 'Alt+ArrowLeft', enabled: (context) => context.note },
+    { id: 'forward', label: 'Navigate forward', shortcut: 'Alt+ArrowRight', enabled: (context) => context.note },
+    { id: 'close-tab', label: 'Close active tab', shortcut: 'Mod+W', enabled: (context) => context.note }
+  ], platform);
 
   let selected = $derived(
     activeNote(navigation.panes.find((pane) => pane.id === navigation.activePaneId) ?? navigation.panes[0])
   );
+  let commandContext = $derived({ workspace: workspace !== null, split: navigation.panes.length === 2, note: selected !== null });
+  let paletteMatches = $derived(commandRegistry.match(paletteQuery)
+    .filter(({ command }) => commandRegistry.isEnabled(command.id, commandContext)));
 
   async function open() {
     if (!root.trim()) return;
@@ -48,6 +82,7 @@
       const first = workspace.notes[0] ?? null;
       navigation = createNavigation(first ?? undefined);
       documents = {};
+      contexts = {};
       paneErrors = { primary: '', secondary: '' };
       if (first) await load(first, 'primary');
     } catch (cause) {
@@ -80,10 +115,14 @@
     paneBusy[paneId] = true;
     paneErrors[paneId] = '';
     try {
-      const loaded = await readNote(workspaceRoot, note.path);
+      const [loaded, context] = await Promise.all([
+        readNote(workspaceRoot, note.path),
+        readNoteContext(workspaceRoot, note.noteId)
+      ]);
       const pane = navigation.panes.find((candidate) => candidate.id === paneId);
       if (request === requests[paneId] && pane && activeNote(pane)?.noteId === note.noteId && workspace?.root === workspaceRoot) {
         documents[loaded.noteId] = loaded;
+        contexts[context.noteId] = context;
       }
     } catch (cause) {
       const pane = navigation.panes.find((candidate) => candidate.id === paneId);
@@ -132,7 +171,52 @@
     const note = pane ? activeNote(pane) : null;
     if (note && !documents[note.noteId]) void load(note, paneId);
   }
+
+  function executeCommand(id: CommandId) {
+    if (!commandRegistry.isEnabled(id, commandContext)) return;
+    if (id === 'palette') void openPalette();
+    else if (id === 'search') searchInput?.focus();
+    else if (id === 'split') split();
+    else if (id === 'close-split') closeSplit();
+    else if (id === 'back') moveHistory(navigation.activePaneId, 'back');
+    else if (id === 'forward') moveHistory(navigation.activePaneId, 'forward');
+    else if (id === 'close-tab' && selected) closeTab(selected.noteId, navigation.activePaneId);
+    if (id !== 'palette') closePalette();
+  }
+
+  async function openPalette() {
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    paletteOpen = true;
+    paletteQuery = '';
+    paletteIndex = 0;
+    await tick();
+    paletteInput?.focus();
+  }
+
+  function closePalette() {
+    if (!paletteOpen) return;
+    paletteOpen = false;
+    void tick().then(() => returnFocus?.focus());
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (paletteOpen) {
+      if (event.key === 'Escape') { event.preventDefault(); closePalette(); }
+      else if (event.key === 'ArrowDown') { event.preventDefault(); paletteIndex = Math.min(paletteIndex + 1, paletteMatches.length - 1); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); paletteIndex = Math.max(paletteIndex - 1, 0); }
+      else if (event.key === 'Enter' && paletteMatches[paletteIndex]) { event.preventDefault(); executeCommand(paletteMatches[paletteIndex].command.id); }
+      return;
+    }
+    if (shouldSuppressShortcut(event)) return;
+    const command = commandRegistry.commandForShortcut(event);
+    if (command && commandRegistry.isEnabled(command.id, commandContext)) {
+      event.preventDefault();
+      executeCommand(command.id);
+    }
+  }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <svelte:head><title>{workspace ? workspaceName(workspace.root) : 'SecondBrain'}</title></svelte:head>
 
@@ -156,7 +240,7 @@
       <div class="brand"><span class="mark">S</span><strong>SecondBrain</strong></div>
       <form class="search" onsubmit={(event) => { event.preventDefault(); search(); }}>
         <span aria-hidden="true">⌕</span>
-        <input aria-label="Search workspace" bind:value={query} placeholder="Search this workspace" />
+        <input bind:this={searchInput} aria-label="Search workspace" bind:value={query} placeholder="Search this workspace" />
         <kbd>↵</kbd>
       </form>
       {#if error}<p class="error global-error" role="alert">{error}</p>{/if}
@@ -231,6 +315,30 @@
       {/each}
     </section>
 
+    <aside class="context-panel" aria-label="Note context">
+      {#if selected && contexts[selected.noteId]}
+        {@const context = contexts[selected.noteId]}
+        <section aria-labelledby="outline-title"><h2 id="outline-title">Outline</h2>
+          {#if context.outline.length}<ol class="outline-list">{#each context.outline as heading}<li style={`--level: ${heading.level}`}><button title={`Line ${heading.line}`}>{heading.text}</button></li>{/each}</ol>
+          {:else}<p class="context-empty">No headings</p>{/if}
+        </section>
+        <section aria-labelledby="backlinks-title"><h2 id="backlinks-title">Backlinks</h2>
+          {#if context.backlinks.length}<ul class="backlink-list">{#each context.backlinks as backlink (backlink.noteId)}<li><button onclick={() => choose(backlink)}><span>{noteLabel(backlink)}</span><small>{backlink.path}</small></button></li>{/each}</ul>
+          {:else}<p class="context-empty">No backlinks</p>{/if}
+        </section>
+      {:else if selected && paneBusy[navigation.activePaneId]}<p class="context-empty">Loading context...</p>
+      {:else}<p class="context-empty">Select a note</p>{/if}
+    </aside>
+
     <footer><span>{busy || paneBusy.primary || paneBusy.secondary ? 'Working…' : 'Ready'}</span><span>SecondBrain · Phase 1</span></footer>
+  {/if}
+  {#if paletteOpen}
+    <div class="palette-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) closePalette(); }}>
+      <div class="command-palette" role="dialog" aria-modal="true" aria-labelledby="palette-title">
+        <h2 id="palette-title">Command palette</h2>
+        <input bind:this={paletteInput} aria-label="Find a command" bind:value={paletteQuery} oninput={() => { paletteIndex = 0; }} autocomplete="off" />
+        <ul role="listbox" aria-label="Commands">{#each paletteMatches as match, index (match.command.id)}<li><button class:active={index === paletteIndex} role="option" aria-selected={index === paletteIndex} onclick={() => executeCommand(match.command.id)}>{match.command.label}<kbd>{match.command.normalizedShortcut?.signature ?? ''}</kbd></button></li>{:else}<li class="context-empty">No matching commands</li>{/each}</ul>
+      </div>
+    </div>
   {/if}
 </main>

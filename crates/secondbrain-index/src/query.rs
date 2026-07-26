@@ -66,6 +66,13 @@ pub struct NoteSummary {
     pub title: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Heading {
+    pub level: u8,
+    pub text: String,
+    pub line: i64,
+}
+
 impl IndexDatabase {
     pub fn search(&self, query: &SearchQuery) -> Result<Vec<SearchHit>> {
         let fts = build_fts_query(&query.text)?;
@@ -130,6 +137,41 @@ impl IndexDatabase {
             path: row.get(1)?,
             title: row.get(2)?,
         }))
+    }
+
+    pub fn note_by_id(&self, note: NoteId) -> Result<Option<NoteSummary>> {
+        let mut statement = self.connection().prepare(
+            "SELECT n.note_id,p.path,n.title FROM notes n
+             JOIN paths p ON p.note_id=n.note_id AND p.is_current=1
+             WHERE n.note_id=?1",
+        )?;
+        let mut rows = statement.query([note.to_string()])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let id: String = row.get(0)?;
+        Ok(Some(NoteSummary {
+            note_id: parse_id(&id)?,
+            path: row.get(1)?,
+            title: row.get(2)?,
+        }))
+    }
+
+    /// Headings for `note` in source order.
+    pub fn headings(&self, note: NoteId) -> Result<Vec<Heading>> {
+        let mut statement = self.connection().prepare(
+            "SELECT level,text,line FROM headings
+             WHERE note_id=?1 ORDER BY line,id",
+        )?;
+        let rows = statement.query_map([note.to_string()], |row| {
+            Ok(Heading {
+                level: row.get(0)?,
+                text: row.get(1)?,
+                line: row.get(2)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
     }
 
     pub fn backlinks(&self, note: NoteId) -> Result<Vec<LinkHit>> {

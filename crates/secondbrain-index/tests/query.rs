@@ -149,6 +149,44 @@ fn backlinks_and_outgoing_links_are_typed_and_ordered() {
 }
 
 #[test]
+fn headings_from_real_fixture_are_typed_and_in_source_order() {
+    let dir = tempdir().unwrap();
+    let source = include_str!("../../../fixtures/markdown/extract/headings.md");
+    let database = build(dir.path(), &[("headings.md", source)]);
+    let note = database.note_by_path("headings.md").unwrap().unwrap();
+
+    let headings = database.headings(note.note_id).unwrap();
+
+    assert_eq!(
+        headings
+            .iter()
+            .map(|heading| (heading.level, heading.text.as_str(), heading.line))
+            .collect::<Vec<_>>(),
+        [
+            (1, "Headings", 1),
+            (2, "First Section", 3),
+            (3, "Subsection", 7),
+            (2, "Second Section", 11),
+        ]
+    );
+}
+
+#[test]
+fn headings_are_empty_for_notes_without_an_outline_and_missing_notes() {
+    let dir = tempdir().unwrap();
+    let database = build(dir.path(), &[("empty.md", "Plain text only.\n")]);
+    let note = database.note_by_path("empty.md").unwrap().unwrap();
+
+    assert!(database.headings(note.note_id).unwrap().is_empty());
+    assert!(
+        database
+            .headings("01ARZ3NDEKTSV4RRFFQ69G5FAY".parse().unwrap())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn outgoing_links_order_resolved_by_path_then_unresolved_by_target() {
     let dir = tempdir().unwrap();
     let database = build(

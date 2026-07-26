@@ -11,4 +11,4 @@ pub use indexer::{
     DumpLink, DumpNote, IndexConfig, IndexError, IndexReport, LogicalDump, index_path,
     logical_dump, note_paths, rebuild,
 };
-pub use query::{BrokenLink, LinkHit, NoteSummary, SearchHit, SearchQuery};
+pub use query::{BrokenLink, Heading, LinkHit, NoteSummary, SearchHit, SearchQuery};

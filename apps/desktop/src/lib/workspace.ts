@@ -23,6 +23,18 @@ export interface NoteDocument extends NoteSummary {
   source: string;
 }
 
+export interface OutlineHeading {
+  level: number;
+  text: string;
+  line: number;
+}
+
+export interface NoteContext {
+  noteId: string;
+  outline: OutlineHeading[];
+  backlinks: NoteSummary[];
+}
+
 export const openWorkspace = (root: string) =>
   invoke<WorkspaceSummary>('open_workspace', { root });
 
@@ -31,3 +43,6 @@ export const searchWorkspace = (root: string, query: string) =>
 
 export const readNote = (root: string, path: string) =>
   invoke<NoteDocument>('read_note', { root, path });
+
+export const readNoteContext = (root: string, noteId: string) =>
+  invoke<NoteContext>('note_context', { root, noteId });

@@ -172,8 +172,8 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | 34 | Gate the desktop shell in CI | ✅ |
 | 35 | Add note read contract and source rendering | ✅ |
 | 36 | Add tabs, split panes, and navigation history | ✅ |
-| 37 | Add outline and backlinks panels | ⬜ |
-| 38 | Add keyboard navigation and command palette foundation | ⬜ |
+| 37 | Add outline and backlinks panels | ✅ local |
+| 38 | Add keyboard navigation and command palette foundation | ✅ local |
 | 39 | Specify TipTap/ProseMirror transaction adapter | ⬜ |
 | 40 | Implement WYSIWYG editor | ⬜ |
 | 41 | Implement CodeMirror source editor | ⬜ |
