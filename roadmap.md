@@ -171,7 +171,7 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | 33 | Add typed workspace-open and search backend contract | ✅ |
 | 34 | Gate the desktop shell in CI | ✅ |
 | 35 | Add note read contract and source rendering | ✅ |
-| 36 | Add tabs, split panes, and navigation history | ⬜ |
+| 36 | Add tabs, split panes, and navigation history | ✅ local |
 | 37 | Add outline and backlinks panels | ⬜ |
 | 38 | Add keyboard navigation and command palette foundation | ⬜ |
 | 39 | Specify TipTap/ProseMirror transaction adapter | ⬜ |
