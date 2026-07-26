@@ -171,7 +171,7 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | 33 | Add typed workspace-open and search backend contract | ✅ |
 | 34 | Gate the desktop shell in CI | ✅ |
 | 35 | Add note read contract and source rendering | ✅ |
-| 36 | Add tabs, split panes, and navigation history | ✅ local |
+| 36 | Add tabs, split panes, and navigation history | ✅ |
 | 37 | Add outline and backlinks panels | ⬜ |
 | 38 | Add keyboard navigation and command palette foundation | ⬜ |
 | 39 | Specify TipTap/ProseMirror transaction adapter | ⬜ |
@@ -188,6 +188,8 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | 50 | Produce desktop installers and Phase 1 evidence | ⬜ |
 
 **Tasks 32–35 verification:** CI run [`30191106041`](https://github.com/dwickyfp/SecondBrain/actions/runs/30191106041) passed the desktop frontend, desktop backend on macOS/Windows/Linux, core quality matrix, and both dependency-policy checks for commit `ed1c01f`.
+
+**Task 36 verification:** CI run [`30191974390`](https://github.com/dwickyfp/SecondBrain/actions/runs/30191974390) passed the typed navigation tests, responsive desktop frontend build, desktop backend matrix, core quality matrix, and dependency policies for commit `e62b2ca`.
 
 **Key deliverables:**
 - Tauri 2 desktop shell (macOS, Windows, Linux)
