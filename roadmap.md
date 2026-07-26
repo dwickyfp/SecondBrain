@@ -167,10 +167,10 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | Task | Deliverable | Status |
 |---:|---|:---:|
 | 31 | Define Phase 1 milestones and acceptance gates | ✅ |
-| 32 | Create Tauri 2 + Svelte 5 desktop shell | ✅ local |
-| 33 | Add typed workspace-open and search backend contract | ✅ local |
-| 34 | Gate the desktop shell in CI | 🔄 Windows fix pending remote CI |
-| 35 | Add note read contract and source rendering | ✅ local |
+| 32 | Create Tauri 2 + Svelte 5 desktop shell | ✅ |
+| 33 | Add typed workspace-open and search backend contract | ✅ |
+| 34 | Gate the desktop shell in CI | ✅ |
+| 35 | Add note read contract and source rendering | ✅ |
 | 36 | Add tabs, split panes, and navigation history | ⬜ |
 | 37 | Add outline and backlinks panels | ⬜ |
 | 38 | Add keyboard navigation and command palette foundation | ⬜ |
@@ -186,6 +186,8 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | 48 | Add accessibility and recovery UX acceptance suite | ⬜ |
 | 49 | Enforce cold-start, open-note, search, and memory budgets | ⬜ |
 | 50 | Produce desktop installers and Phase 1 evidence | ⬜ |
+
+**Tasks 32–35 verification:** CI run [`30191106041`](https://github.com/dwickyfp/SecondBrain/actions/runs/30191106041) passed the desktop frontend, desktop backend on macOS/Windows/Linux, core quality matrix, and both dependency-policy checks for commit `ed1c01f`.
 
 **Key deliverables:**
 - Tauri 2 desktop shell (macOS, Windows, Linux)
