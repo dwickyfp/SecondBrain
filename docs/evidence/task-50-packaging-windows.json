@@ -1,0 +1,47 @@
+{
+  "schema": "secondbrain.packaging-evidence.v1",
+  "version": "0.1.0",
+  "commit": "77f58c9891e0bf12be020470ba8869494ebfeb20",
+  "source": {
+    "dirty": false,
+    "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mutable": false
+  },
+  "platform": "Windows",
+  "installer": {
+    "name": "SecondBrain_0.1.0_x64_en-US.msi",
+    "kind": "Windows-MSI",
+    "extension": ".msi",
+    "sha256": "cf4f9f3cb302e84c8f4ac65a2eadd38b549df98d1223061f8e82b5f43f7677d9",
+    "smoke": "passed-exact-artifact-extraction-and-launch",
+    "readiness_sha256": "c6e7c8afea49b8ed7352bb76739964f5ef2d64c5fdfbd5d7e0b1d03e9a5bbc2e"
+  },
+  "performance": {
+    "sample_sha256": "7c2940995a3f2b5eee6fa54658f5de297e81ba610e5d2809dc3fd7cc5504c316",
+    "p95_bytes": 355291136,
+    "budget_bytes": null,
+    "status": "recorded-not-enforced",
+    "mode": "hosted-ci-smoke-non-reference"
+  },
+  "fixture_sha256": "7a23c55eb84de48bdcf36648b3e46eefd8d187358449a9d49873f28094d6ad4e",
+  "tools": {
+    "tauri_cli": "tauri-cli 2.11.4",
+    "rustc": "rustc 1.91.1 (ed61e7d7e 2025-11-07)",
+    "node": "v24.18.0"
+  },
+  "signing": {
+    "status": "unsigned",
+    "notarization_status": "not-applicable",
+    "reason": "ordinary CI intentionally produces unsigned installers"
+  },
+  "inputs": {
+    "root_cargo_lock_sha256": "ab9651f2773fd2ddab9d000cee60cd52231589687b6b4a535cf047b36ca9574f",
+    "desktop_cargo_lock_sha256": "f1976a90963400647ce85c7511fd5835a80aa9e1b918da5e250118206e5c4e5f",
+    "npm_lock_sha256": "d2a03984b5496abef8a9da91058ac04c082160985cb4da2436a4364273f9119e",
+    "budget_sha256": "aea18dd7c9c99a47507dc1e128eb50fbd0a989405b0c31cb192a290a5b5be498",
+    "source_sha256": "a6655a87ab69e6909a471173dca168607c4caf19e5e83021181ae291f855011a"
+  },
+  "ci": {
+    "run_url": "https://github.com/dwickyfp/SecondBrain/actions/runs/30210110453"
+  }
+}

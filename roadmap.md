@@ -20,10 +20,11 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | Metric | Value |
 |---|---|
 | **Phase 0 tasks completed** | 30 / 30; local and cross-platform CI evidence complete |
+| **Phase 1 tasks completed** | 18 / 20; Tasks 48–49 await manual AT and named-reference packaged-memory evidence |
 | **Tests passing** | 348+ |
-| **Crates** | 6 (`cli`, `core`, `markdown`, `vault`, `index`, `transaction`) |
+| **Crates** | 7 (`cli`, `core`, `markdown`, `vault`, `index`, `transaction`, `diagnostics`) |
 | **CI** | macOS · Windows · Linux |
-| **Current commit** | `ac9b0c8` fix(reconcile): preserve note identity across real vault flows |
+| **Phase 1 implementation evidence commit** | `77f58c9891e0bf12be020470ba8869494ebfeb20` |
 
 ### Milestone completion
 
@@ -174,24 +175,28 @@ SecondBrain is a local-first collaborative knowledge workspace for humans and ag
 | 36 | Add tabs, split panes, and navigation history | ✅ |
 | 37 | Add outline and backlinks panels | ✅ |
 | 38 | Add keyboard navigation and command palette foundation | ✅ |
-| 39 | Specify TipTap/ProseMirror transaction adapter | ✅ local |
-| 40 | Implement WYSIWYG editor | ⬜ |
-| 41 | Implement CodeMirror source editor | ⬜ |
-| 42 | Add WYSIWYG/source/split synchronization | ⬜ |
-| 43 | Enforce editor latency and Markdown-survival gates | ⬜ |
-| 44 | Add properties editing | ⬜ |
-| 45 | Add daily notes workflow | ⬜ |
-| 46 | Add graph view | ⬜ |
-| 47 | Add Obsidian-compatible vault import | ⬜ |
-| 48 | Add accessibility and recovery UX acceptance suite | ⬜ |
-| 49 | Enforce cold-start, open-note, search, and memory budgets | ⬜ |
-| 50 | Produce desktop installers and Phase 1 evidence | ⬜ |
+| 39 | Specify TipTap/ProseMirror transaction adapter | ✅ |
+| 40 | Implement WYSIWYG editor | ✅ |
+| 41 | Implement CodeMirror source editor | ✅ |
+| 42 | Add WYSIWYG/source/split synchronization | ✅ |
+| 43 | Enforce editor latency and Markdown-survival gates | ✅ |
+| 44 | Add properties editing | ✅ |
+| 45 | Add daily notes workflow | ✅ |
+| 46 | Add graph view | ✅ |
+| 47 | Add Obsidian-compatible vault import | ✅ |
+| 48 | Add accessibility and recovery UX acceptance suite | ◐ manual AT pending |
+| 49 | Enforce cold-start, open-note, search, and memory budgets | ◐ reference packaged RSS pending |
+| 50 | Produce desktop installers and Phase 1 evidence | ✅ unsigned CI artifacts |
 
 **Tasks 32–35 verification:** CI run [`30191106041`](https://github.com/dwickyfp/SecondBrain/actions/runs/30191106041) passed the desktop frontend, desktop backend on macOS/Windows/Linux, core quality matrix, and both dependency-policy checks for commit `ed1c01f`.
 
 **Task 36 verification:** CI run [`30191974390`](https://github.com/dwickyfp/SecondBrain/actions/runs/30191974390) passed the typed navigation tests, responsive desktop frontend build, desktop backend matrix, core quality matrix, and dependency policies for commit `e62b2ca`.
 
 **Tasks 37–38 verification:** CI run [`30192975329`](https://github.com/dwickyfp/SecondBrain/actions/runs/30192975329) passed the Rust-derived note-context contract, command registry and keyboard regressions, frontend build, desktop backend matrix, core quality matrix, and dependency policies for commit `ca83a66`.
+
+**Tasks 39–50 automated verification:** CI run [`30210110453`](https://github.com/dwickyfp/SecondBrain/actions/runs/30210110453) passed frontend/editor correctness, keyboard and axe E2E, Rust quality and recovery tests, dependency policies, three-platform performance smoke, and exact-artifact DMG/MSI/DEB launch smoke for clean commit `77f58c9891e0bf12be020470ba8869494ebfeb20`. Checksums and immutable package metadata are recorded in `docs/evidence/task-50-native-release.md`.
+
+**Open Phase 1 release gates:** Task 48 still requires VoiceOver, NVDA, and Orca (or a named Linux equivalent) runs against the exact CI artifacts. Task 49 still requires packaged idle process-tree RSS `<250 MiB` on named reference hardware; hosted CI measurements are retained as non-reference observations. Protected signing/notarization remains unclaimed until credentials exist and native verification succeeds. First import/index of the legacy 10K local observation remains optimization debt and is not mislabeled as indexed cold start.
 
 **Key deliverables:**
 - Tauri 2 desktop shell (macOS, Windows, Linux)

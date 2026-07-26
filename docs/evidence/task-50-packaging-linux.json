@@ -1,0 +1,47 @@
+{
+  "schema": "secondbrain.packaging-evidence.v1",
+  "version": "0.1.0",
+  "commit": "77f58c9891e0bf12be020470ba8869494ebfeb20",
+  "source": {
+    "dirty": false,
+    "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mutable": false
+  },
+  "platform": "Linux",
+  "installer": {
+    "name": "SecondBrain_0.1.0_amd64.deb",
+    "kind": "Linux-DEB",
+    "extension": ".deb",
+    "sha256": "c2e7bc661fff599ac4647bdd6b83326837df9faa58252411168110ee9c80f986",
+    "smoke": "passed-exact-artifact-extraction-and-launch",
+    "readiness_sha256": "cf0da85274fafdd94ce0e7f063d54d8391396f2d559deeb34a0044512ec130a0"
+  },
+  "performance": {
+    "sample_sha256": "600831d19ea6d5b0b4d886429c14e1b2ad997b61e709ac47306a700838a8f8c4",
+    "p95_bytes": 658632704,
+    "budget_bytes": null,
+    "status": "recorded-not-enforced",
+    "mode": "hosted-ci-smoke-non-reference"
+  },
+  "fixture_sha256": "c477e5b159fdc2ee19104f5ddd15b1c6bb80553e395731668bf89cf1accbc7f2",
+  "tools": {
+    "tauri_cli": "tauri-cli 2.11.4",
+    "rustc": "rustc 1.91.1 (ed61e7d7e 2025-11-07)",
+    "node": "v24.18.0"
+  },
+  "signing": {
+    "status": "unsigned",
+    "notarization_status": "not-applicable",
+    "reason": "ordinary CI intentionally produces unsigned installers"
+  },
+  "inputs": {
+    "root_cargo_lock_sha256": "442ba0340334a77a7885b7031affe1162cc5245dfe9b28fa4dbf001eea2abcf8",
+    "desktop_cargo_lock_sha256": "661496e8827f541fe8bc94ed38c726ba0a82dca90f097c2567c6f6e3a62e15b4",
+    "npm_lock_sha256": "e5afe33435d838142442e3643a3ffe9c473c151f4e3b3b8e5b724e7d7c40e41b",
+    "budget_sha256": "f6a7b6ac74d40fb269d58d3a56ef4058d64bee67a02a32f1d70a78619737717a",
+    "source_sha256": "73a4cdeda118408f4ee7022c216aa700658d63d99e1c5790d431cc821bf9f924"
+  },
+  "ci": {
+    "run_url": "https://github.com/dwickyfp/SecondBrain/actions/runs/30210110453"
+  }
+}
